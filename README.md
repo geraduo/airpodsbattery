@@ -1,9 +1,11 @@
 <div align="center">
 
+**English** | [Русский](README.ru.md)
+
 # AirPods Battery
 
-**Заряд AirPods на Android: левый и правый наушники, кейс.**  
-Без аккаунта, без облака, без рекламы и без лишних зависимостей.
+**AirPods battery level on Android: left earbud, right earbud and case.**  
+No account, no cloud, no ads, no extra dependencies.
 
 ![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-1.9-7F52FF?logo=kotlin&logoColor=white)
@@ -14,147 +16,149 @@
 
 ---
 
-## О приложении
+## About
 
-На Android нет встроенного способа посмотреть заряд каждого наушника AirPods по отдельности. Это приложение
-читает данные, которые наушники сами рассылают по Bluetooth, и показывает их на одном экране.
+Android has no built-in way to see the battery level of each AirPods earbud separately. This app reads the data
+the earbuds broadcast over Bluetooth and shows it on a single screen.
 
-Приложение работает полностью локально: ему нужен только Bluetooth, интернет не используется.
+Everything runs locally: the app only needs Bluetooth and never uses the internet.
 
-## Возможности
+## Features
 
-- Заряд левого и правого наушника и зарядного кейса с шагом 10 %
-- Индикатор зарядки для каждого устройства
-- Определение модели (AirPods, AirPods 2, AirPods 3, AirPods Pro, AirPods Pro 2)
-- Общий заряд подключённых наушников, если система передаёт его приложению
-- Встроенная диагностика: видно, какие пакеты принимает телефон
-- Никаких сторонних библиотек: чистый Android SDK, интерфейс собирается кодом
+- Battery level of the left earbud, right earbud and charging case in 10 % steps
+- Charging indicator for each device
+- Model detection (AirPods, AirPods 2, AirPods 3, AirPods Pro, AirPods Pro 2)
+- Overall battery level of connected earbuds, when the system passes it to the app
+- Built-in diagnostics: shows which packets the phone is receiving
+- No third-party libraries: plain Android SDK, the UI is built in code
 
-## Как это работает
+> The app interface is in Russian.
 
-Данные берутся из двух источников.
+## How it works
 
-| Источник | Что показывает | Когда доступен |
+Data comes from two sources.
+
+| Source | What it shows | When it is available |
 | --- | --- | --- |
-| Bluetooth LE-реклама Apple (тип `0x07`) | Левый, правый, кейс, признаки зарядки | Крышка кейса открыта рядом с телефоном |
-| Команда гарнитуры `+IPHONEACCEV` | Один общий процент | Наушники подключены; значение приходит при подключении и при изменении заряда |
+| Apple Bluetooth LE advertisement (type `0x07`) | Left, right, case, charging flags | The case lid is open near the phone |
+| Headset command `+IPHONEACCEV` | A single overall percentage | Earbuds are connected; the value arrives on connect and when the level changes |
 
-Формат рекламного пакета (данные производителя, идентификатор компании Apple `0x004C`):
+Advertisement packet layout (manufacturer data, Apple company ID `0x004C`):
 
-| Байт | Значение |
+| Byte | Meaning |
 | --- | --- |
-| 0 | Тип сообщения (`0x07`) |
-| 1 | Длина данных |
-| 3–4 | Код модели |
-| 5 | Статус (в том числе признак «наушники поменяны местами») |
-| 6 | Заряд наушников, по полубайту на каждый |
-| 7 | Старший полубайт: флаги зарядки; младший: заряд кейса |
+| 0 | Message type (`0x07`) |
+| 1 | Data length |
+| 3–4 | Model code |
+| 5 | Status (including the "earbuds swapped" flag) |
+| 6 | Earbud battery, one nibble each |
+| 7 | High nibble: charging flags; low nibble: case battery |
 
-Значения заряда от 0 до 10 соответствуют 0–100 %, значение 15 означает «данных нет».
+Battery values from 0 to 10 map to 0–100 %; the value 15 means "no data".
 
-## Поддерживаемые модели
+## Supported models
 
-| Модель | Код |
+| Model | Code |
 | --- | --- |
-| AirPods (1-го поколения) | `0x0220` |
-| AirPods (2-го поколения) | `0x0F20` |
-| AirPods (3-го поколения) | `0x1320` |
+| AirPods (1st generation) | `0x0220` |
+| AirPods (2nd generation) | `0x0F20` |
+| AirPods (3rd generation) | `0x1320` |
 | AirPods Pro | `0x0E20` |
-| AirPods Pro (2-го поколения) | `0x1420` |
+| AirPods Pro (2nd generation) | `0x1420` |
 
-> Проверено на AirPods 2. Остальные модели разбираются по описанию формата и отдельно не тестировались.
+> Tested on AirPods 2. Other models are parsed according to the packet format description and have not been tested separately.
 
-## Требования
+## Requirements
 
-- Android 8.0 (API 26) или новее
+- Android 8.0 (API 26) or newer
 - Bluetooth LE
-- Включённая геолокация: без неё Android не отдаёт результаты Bluetooth-сканирования
+- Location turned on: without it Android does not deliver Bluetooth scan results
 
-### Разрешения
+### Permissions
 
-| Разрешение | Зачем нужно |
+| Permission | Why it is needed |
 | --- | --- |
-| `BLUETOOTH_SCAN` (Android 12+) | Поиск рекламных пакетов AirPods |
-| `BLUETOOTH_CONNECT` (Android 12+) | Получение данных подключённой гарнитуры |
-| `ACCESS_FINE_LOCATION` | Требование Android к Bluetooth-сканированию. Местоположение не используется и никуда не передаётся |
+| `BLUETOOTH_SCAN` (Android 12+) | Scanning for AirPods advertisement packets |
+| `BLUETOOTH_CONNECT` (Android 12+) | Receiving data from a connected headset |
+| `ACCESS_FINE_LOCATION` | Android requires it for Bluetooth scanning. Your location is not used or sent anywhere |
 
-## Сборка
+## Build
 
-### Через GitHub Actions (без установки Android Studio)
+### With GitHub Actions (no Android Studio needed)
 
-1. Загрузите все файлы проекта в репозиторий на GitHub, включая скрытую папку `.github`.
-2. Откройте вкладку **Actions** и выберите сборку **Build APK**. Она запускается при каждом коммите, а также вручную через **Run workflow**.
-3. После зелёной галочки скачайте артефакт `AirPodsBattery-apk`. Внутри лежит `app-debug.apk`.
-4. Перенесите APK на телефон и установите, разрешив установку из неизвестных источников.
+1. Upload all project files to a GitHub repository, including the hidden `.github` folder.
+2. Open the **Actions** tab and select the **Build APK** workflow. It runs on every commit and can also be started manually with **Run workflow**.
+3. When it finishes with a green check, download the `AirPodsBattery-apk` artifact. It contains `app-debug.apk`.
+4. Copy the APK to your phone and install it, allowing installation from unknown sources.
 
-### Через Android Studio
+### With Android Studio
 
-1. Откройте папку проекта в Android Studio (Hedgehog или новее) и дождитесь синхронизации Gradle.
-2. Подключите телефон с включённой отладкой по USB и нажмите **Run**.
+1. Open the project folder in Android Studio (Hedgehog or newer) and wait for Gradle sync to finish.
+2. Connect a phone with USB debugging enabled and press **Run**.
 
-### Из командной строки
+### From the command line
 
-Нужны JDK 17, Android SDK и Gradle 8.9 или новее:
+You need JDK 17, the Android SDK and Gradle 8.9 or newer:
 
 ```bash
 gradle assembleDebug
 ```
 
-Готовый файл появится в `app/build/outputs/apk/debug/app-debug.apk`.
+The APK will be at `app/build/outputs/apk/debug/app-debug.apk`.
 
-## Использование
+## Usage
 
-1. Запустите приложение и выдайте разрешения.
-2. Откройте крышку кейса рядом с телефоном. Через пару секунд появятся значения.
-3. Если наушники уже подключены, строка «Общий заряд» обновится, когда они пришлют данные. Чтобы ускорить это, переподключите наушники при открытом приложении.
+1. Launch the app and grant the permissions.
+2. Open the case lid near the phone. Values appear within a couple of seconds.
+3. If the earbuds are already connected, the "Общий заряд" (overall battery) line updates when they send data. To speed this up, reconnect the earbuds while the app is open.
 
-## Если ничего не показывается
+## Troubleshooting
 
-Нажмите **Диагностику** на главном экране. Строка покажет, сколько пакетов принял телефон:
+Press the **Диагностика** (Diagnostics) button on the main screen. The line it shows tells you how many packets the phone has received:
 
-| Что видно | Что это значит |
+| What you see | What it means |
 | --- | --- |
-| Пакетов `0` | Нет разрешений, выключены Bluetooth или геолокация |
-| Есть пакеты, `Apple 0` | Телефон видит другие устройства, но не продукты Apple |
-| Есть `Apple`, но `AirPods(07) 0` | Наушники не рассылают нужные данные: откройте крышку кейса, отключите наушники от других устройств |
-| `AirPods(07)` растёт, а значений нет | Пришлите строку диагностики в issue |
+| Packets `0` | Missing permissions, or Bluetooth or location is off |
+| Packets received, `Apple 0` | The phone sees other devices, but no Apple products |
+| `Apple` present, but `AirPods(07) 0` | The earbuds are not broadcasting the needed data: open the case lid and disconnect the earbuds from other devices |
+| `AirPods(07)` grows, but no values shown | Open an issue and include the diagnostics line |
 
-## Структура проекта
+## Project structure
 
 ```
 .
-├── .github/workflows/build.yml      сборка APK в GitHub Actions
+├── .github/workflows/build.yml      APK build in GitHub Actions
 ├── app/
 │   └── src/main/
 │       ├── AndroidManifest.xml
 │       ├── java/app/podsbattery/
-│       │   ├── MainActivity.kt      сканирование, разбор пакетов, интерфейс
-│       │   └── Widgets.kt           палитра и индикатор заряда
-│       └── res/                     тема, цвета, иконка
+│       │   ├── MainActivity.kt      scanning, packet parsing, UI
+│       │   └── Widgets.kt           palette and battery indicator
+│       └── res/                     theme, colors, icon
 ├── build.gradle.kts
 └── settings.gradle.kts
 ```
 
-## Ограничения
+## Limitations
 
-- Точные значения по каждому наушнику приходят только пока наушники рассылают данные (обычно при открытой крышке кейса).
-- Формат пакетов Apple не документирован и может измениться с обновлением прошивки наушников.
-- Точность заряда ограничена шагом в 10 %: так его передают сами наушники.
+- Exact per-earbud values arrive only while the earbuds are broadcasting (usually when the case lid is open).
+- Apple's packet format is undocumented and may change with earbud firmware updates.
+- Battery accuracy is limited to 10 % steps, because that is how the earbuds report it.
 
-## Авторы
+## Authors
 
-- [@geraduo](https://github.com/geraduo): идея, тестирование, дизайн
-- @claude: код приложения и документация
+- [@geraduo](https://github.com/geraduo): idea, testing, design
+- @claude: app code and documentation
 
-## Благодарности
+## Acknowledgements
 
-Формат рекламных пакетов разобран сообществом, в том числе в проекте
-[OpenPods](https://github.com/adolfintel/OpenPods).
+The advertisement packet format was worked out by the community, including the
+[OpenPods](https://github.com/adolfintel/OpenPods) project.
 
-## Отказ от ответственности
+## Disclaimer
 
-Проект независимый и не связан с Apple Inc. AirPods — товарный знак Apple Inc.
+This project is independent and is not affiliated with Apple Inc. AirPods is a trademark of Apple Inc.
 
-## Лицензия
+## License
 
 [MIT](LICENSE)
