@@ -30,9 +30,8 @@ Everything runs locally: the app only needs Bluetooth and never uses the interne
 - Model detection (AirPods, AirPods 2, AirPods 3, AirPods Pro, AirPods Pro 2)
 - Overall battery level of connected earbuds, when the system passes it to the app
 - Built-in diagnostics: shows which packets the phone is receiving
+- Two interface languages: English (default) and Russian, switched with the **EN / RU** toggle in the top bar; the choice is remembered
 - No third-party libraries: plain Android SDK, the UI is built in code
-
-> The app interface is in Russian.
 
 ## How it works
 
@@ -110,11 +109,11 @@ The APK will be at `app/build/outputs/apk/debug/app-debug.apk`.
 
 1. Launch the app and grant the permissions.
 2. Open the case lid near the phone. Values appear within a couple of seconds.
-3. If the earbuds are already connected, the "Общий заряд" (overall battery) line updates when they send data. To speed this up, reconnect the earbuds while the app is open.
+3. If the earbuds are already connected, the "Overall battery via connection" line updates when they send data. To speed this up, reconnect the earbuds while the app is open.
 
 ## Troubleshooting
 
-Press the **Диагностика** (Diagnostics) button on the main screen. The line it shows tells you how many packets the phone has received:
+Press the **Diagnostics** button on the main screen. The line it shows tells you how many packets the phone has received:
 
 | What you see | What it means |
 | --- | --- |
@@ -134,7 +133,7 @@ Press the **Диагностика** (Diagnostics) button on the main screen. Th
 │       ├── java/app/podsbattery/
 │       │   ├── MainActivity.kt      scanning, packet parsing, UI
 │       │   └── Widgets.kt           palette and battery indicator
-│       └── res/                     theme, colors, icon
+│       └── res/                     theme, colors, icon, strings (en, ru)
 ├── build.gradle.kts
 └── settings.gradle.kts
 ```

@@ -29,6 +29,7 @@ object Palette {
 /** Строка заряда на тёмной карточке: число, подпись и 10 сегментов (как «пиксели» на сайте). */
 class BatteryRow(context: Context, private val title: String) : View(context) {
     private val d = resources.displayMetrics.density
+    private val chargingText = context.getString(R.string.charging)
     private val numPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.create("sans-serif", Typeface.BOLD)
         letterSpacing = -0.03f
@@ -98,7 +99,7 @@ class BatteryRow(context: Context, private val title: String) : View(context) {
         canvas.drawText(title, x1, 14 * d, labelPaint)
         if (charging) {
             subPaint.textSize = 10 * d
-            canvas.drawText("⚡ ЗАРЯДКА", x1, 30 * d, subPaint)
+            canvas.drawText(chargingText, x1, 30 * d, subPaint)
         }
 
         val n = 10

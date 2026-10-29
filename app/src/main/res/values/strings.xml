@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AirPods Battery</string>
+
+    <string name="chip_live">LIVE</string>
+    <string name="chip_searching">SEARCHING</string>
+
+    <string name="status_searching">Searching for AirPods…</string>
+    <string name="status_connected">Connected · data updating</string>
+    <string name="status_no_signal">No signal · open the case lid</string>
+    <string name="status_scan_error">Scan error: %1$d</string>
+    <string name="status_need_permission">Bluetooth permission required</string>
+    <string name="status_no_permission">No Bluetooth permission</string>
+    <string name="status_bt_off">Turn on Bluetooth</string>
+    <string name="status_location_off">Turn on location in quick settings</string>
+
+    <string name="card_title">Battery</string>
+    <string name="row_left">LEFT</string>
+    <string name="row_right">RIGHT</string>
+    <string name="row_case">CASE</string>
+    <string name="charging">⚡ CHARGING</string>
+    <string name="headset_level">Overall battery via connection · %1$d%%</string>
+
+    <string name="btn_refresh">Refresh</string>
+    <string name="btn_diagnostics">Diagnostics</string>
+    <string name="hint_case">Exact values arrive while the case lid is open.</string>
+    <string name="disclaimer">AirPods is a trademark of Apple Inc. This app is independent.</string>
+
+    <string name="debug_empty">Diagnostics: —</string>
+    <string name="debug_main">Diagnostics: packets %1$d, Apple %2$d, AirPods(07) %3$d; Apple types: %4$s</string>
+    <string name="debug_headset">headset events: %1$d (last: %2$s)</string>
+</resources>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AirPods Battery</string>
+
+    <string name="chip_live">LIVE</string>
+    <string name="chip_searching">ПОИСК</string>
+
+    <string name="status_searching">Поиск AirPods…</string>
+    <string name="status_connected">Подключено · данные обновляются</string>
+    <string name="status_no_signal">Нет сигнала · откройте крышку кейса</string>
+    <string name="status_scan_error">Ошибка сканирования: %1$d</string>
+    <string name="status_need_permission">Нужно разрешение на Bluetooth</string>
+    <string name="status_no_permission">Нет разрешения на Bluetooth</string>
+    <string name="status_bt_off">Включите Bluetooth</string>
+    <string name="status_location_off">Включите геолокацию в шторке</string>
+
+    <string name="card_title">Заряд</string>
+    <string name="row_left">ЛЕВЫЙ</string>
+    <string name="row_right">ПРАВЫЙ</string>
+    <string name="row_case">КЕЙС</string>
+    <string name="charging">⚡ ЗАРЯДКА</string>
+    <string name="headset_level">Общий заряд по подключению · %1$d%%</string>
+
+    <string name="btn_refresh">Обновить</string>
+    <string name="btn_diagnostics">Диагностика</string>
+    <string name="hint_case">Точные данные приходят при открытой крышке кейса.</string>
+    <string name="disclaimer">AirPods — товарный знак Apple Inc. Приложение независимое.</string>
+
+    <string name="debug_empty">Диагностика: —</string>
+    <string name="debug_main">Диагностика: пакетов %1$d, Apple %2$d, AirPods(07) %3$d; типы Apple: %4$s</string>
+    <string name="debug_headset">HFP-событий: %1$d (последнее: %2$s)</string>
+</resources>

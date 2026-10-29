@@ -11,6 +11,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
@@ -27,8 +28,12 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import java.util.Locale
 
 private const val APPLE_COMPANY_ID = 0x004C
+private const val PREFS = "settings"
+private const val KEY_LANG = "lang"
+private const val DEFAULT_LANG = "en"
 
 class MainActivity : Activity() {
 
@@ -70,7 +75,7 @@ class MainActivity : Activity() {
                 }
             }
             val t = types.entries.joinToString(", ") { String.format("%02X", it.key) + "x" + it.value }
-            debugLabel.text = "Диагностика: пакетов $total, Apple $apple, AirPods(07) $pairing; типы Apple: $t"
+            debugLabel.text = getString(R.string.debug_main, total, apple, pairing, t)
         }
 
         override fun onBatchScanResults(results: MutableList<ScanResult>) {
@@ -78,14 +83,14 @@ class MainActivity : Activity() {
         }
 
         override fun onScanFailed(errorCode: Int) {
-            setStatus("Ошибка сканирования: $errorCode")
+            setStatus(getString(R.string.status_scan_error, errorCode))
         }
     }
 
     private val signalWatchdog = object : Runnable {
         override fun run() {
             if (scanning && System.currentTimeMillis() - lastSeen > 8000) {
-                setStatus("Нет сигнала · откройте крышку кейса")
+                setStatus(getString(R.string.status_no_signal))
             }
             handler.postDelayed(this, 1000)
         }
@@ -110,7 +115,7 @@ class MainActivity : Activity() {
                 }
             }
             debugLabel.text = debugLabel.text.toString().substringBefore(" | ") +
-                " | HFP-событий: $headsetEvents (последнее: $lastCmd)"
+                " | " + getString(R.string.debug_headset, headsetEvents, lastCmd)
         }
     }
 
@@ -123,10 +128,26 @@ class MainActivity : Activity() {
         } catch (_: Exception) {}
     }
 
+    override fun attachBaseContext(base: Context) {
+        val lang = base.getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_LANG, DEFAULT_LANG) ?: DEFAULT_LANG
+        val config = Configuration(base.resources.configuration)
+        config.setLocale(Locale(lang))
+        super.attachBaseContext(base.createConfigurationContext(config))
+    }
+
+    private fun currentLang() =
+        getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_LANG, DEFAULT_LANG) ?: DEFAULT_LANG
+
+    private fun setLanguage(lang: String) {
+        if (lang == currentLang()) return
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_LANG, lang).apply()
+        recreate()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildUi()
-        setStatus("Поиск AirPods…")
+        setStatus(getString(R.string.status_searching))
     }
 
     override fun onResume() {
@@ -145,7 +166,7 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, perms, results)
-        if (hasPermissions()) startScan() else setStatus("Нужно разрешение на Bluetooth")
+        if (hasPermissions()) startScan() else setStatus(getString(R.string.status_need_permission))
     }
 
     private fun neededPermissions(): Array<String> =
@@ -165,12 +186,12 @@ class MainActivity : Activity() {
         if (scanning) return
         val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
         if (adapter == null || !adapter.isEnabled) {
-            setStatus("Включите Bluetooth")
+            setStatus(getString(R.string.status_bt_off))
             return
         }
         val lm = getSystemService(LOCATION_SERVICE) as LocationManager
         if (Build.VERSION.SDK_INT >= 28 && !lm.isLocationEnabled) {
-            setStatus("Включите геолокацию в шторке")
+            setStatus(getString(R.string.status_location_off))
             return
         }
         val settings = ScanSettings.Builder()
@@ -181,9 +202,9 @@ class MainActivity : Activity() {
             adapter.bluetoothLeScanner.startScan(null, settings, callback)
             scanning = true
             lastSeen = System.currentTimeMillis()
-            setStatus("Поиск AirPods…")
+            setStatus(getString(R.string.status_searching))
         } catch (e: SecurityException) {
-            setStatus("Нет разрешения на Bluetooth")
+            setStatus(getString(R.string.status_no_permission))
         }
     }
 
@@ -231,7 +252,7 @@ class MainActivity : Activity() {
             0x1420 -> "AirPods Pro 2"
             else -> "AirPods"
         }
-        setStatus("Подключено · данные обновляются", true)
+        setStatus(getString(R.string.status_connected), true)
         leftRow.setLevel(percent(leftV), chargeL)
         rightRow.setLevel(percent(rightV), chargeR)
         caseRow.setLevel(percent(caseV), chargeC)
@@ -241,7 +262,7 @@ class MainActivity : Activity() {
 
     private fun showHeadsetLevel(pct: Int) {
         headsetText.visibility = View.VISIBLE
-        headsetText.text = "Общий заряд по подключению · $pct%"
+        headsetText.text = getString(R.string.headset_level, pct)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -249,7 +270,7 @@ class MainActivity : Activity() {
     private fun setStatus(text: String, live: Boolean = false) {
         if (!::signalText.isInitialized) return
         signalText.text = text
-        statusLabel.text = if (live) "LIVE" else "ПОИСК"
+        statusLabel.text = getString(if (live) R.string.chip_live else R.string.chip_searching)
         (statusDot.background as GradientDrawable).setColor(if (live) Palette.LIVE else Palette.ACCENT)
     }
 
@@ -281,6 +302,28 @@ class MainActivity : Activity() {
             }
         }
 
+    private fun languageToggle() = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(3), dp(3), dp(3), dp(3))
+        background = GradientDrawable().apply {
+            cornerRadius = dp(100).toFloat()
+            setColor(Color.TRANSPARENT)
+            setStroke(dp(1), Palette.LINE)
+        }
+        for ((code, label) in listOf("en" to "EN", "ru" to "RU")) {
+            val active = code == currentLang()
+            addView(mono(label, 10f, if (active) Palette.ON_DARK else Palette.MUTED, true).apply {
+                setPadding(dp(9), dp(6), dp(9), dp(6))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(100).toFloat()
+                    setColor(if (active) Palette.INK else Color.TRANSPARENT)
+                }
+                setOnClickListener { setLanguage(code) }
+            })
+        }
+    }
+
     private fun darkLine() = View(this).apply { setBackgroundColor(Palette.LINE_DARK) }
 
     private fun buildUi() {
@@ -305,7 +348,7 @@ class MainActivity : Activity() {
                 FrameLayout.LayoutParams(dp(8), dp(8), Gravity.CENTER))
         }
         statusDot = View(this).apply { background = oval(Palette.ACCENT) }
-        statusLabel = mono("ПОИСК", 10f, Palette.ON_DARK, true)
+        statusLabel = mono(getString(R.string.chip_searching), 10f, Palette.ON_DARK, true)
         val statusPill = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -329,6 +372,7 @@ class MainActivity : Activity() {
             addView(logo, LinearLayout.LayoutParams(dp(30), dp(30)))
             addView(mono("AirPods", 12f, Palette.INK, true),
                 LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
+            addView(languageToggle(), LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
             addView(statusPill)
         }
         col.addView(topBar, LinearLayout.LayoutParams(-1, -2))
@@ -342,15 +386,15 @@ class MainActivity : Activity() {
                 intArrayOf(0xFF3B2B23.toInt(), 0xFF1F1D1B.toInt(), Palette.INK)
             ).apply { cornerRadius = dp(36).toFloat() }
         }
-        card.addView(mono("Заряд", 10f, Palette.MUTED_DARK))
+        card.addView(mono(getString(R.string.card_title), 10f, Palette.MUTED_DARK))
         modelTitle = tv("AirPods", 34f, Palette.ON_DARK, "sans-serif", Typeface.BOLD, -0.03f)
         card.addView(modelTitle, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(12) })
-        signalText = tv("Поиск AirPods…", 13f, Palette.MUTED_DARK)
+        signalText = tv(getString(R.string.status_searching), 13f, Palette.MUTED_DARK)
         card.addView(signalText, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
 
-        leftRow = BatteryRow(this, "ЛЕВЫЙ")
-        rightRow = BatteryRow(this, "ПРАВЫЙ")
-        caseRow = BatteryRow(this, "КЕЙС")
+        leftRow = BatteryRow(this, getString(R.string.row_left))
+        rightRow = BatteryRow(this, getString(R.string.row_right))
+        caseRow = BatteryRow(this, getString(R.string.row_case))
         card.addView(leftRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(24) })
         card.addView(darkLine(), LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(14); bottomMargin = dp(14) })
         card.addView(rightRow, LinearLayout.LayoutParams(-1, -2))
@@ -360,10 +404,10 @@ class MainActivity : Activity() {
         headsetText = mono("", 10f, Palette.MUTED_DARK).apply { visibility = View.GONE; isAllCaps = false }
         card.addView(headsetText, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(18) })
 
-        val restart = pill("Обновить", Palette.BG, Palette.INK, Palette.ON_DARK).apply {
+        val restart = pill(getString(R.string.btn_refresh), Palette.BG, Palette.INK, Palette.ON_DARK).apply {
             setOnClickListener { stopScan(); startScan() }
         }
-        val diag = pill("Диагностика", Color.TRANSPARENT, Palette.ON_DARK, Palette.LINE_DARK).apply {
+        val diag = pill(getString(R.string.btn_diagnostics), Color.TRANSPARENT, Palette.ON_DARK, Palette.LINE_DARK).apply {
             setOnClickListener {
                 debugLabel.visibility = if (debugLabel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
             }
@@ -377,11 +421,11 @@ class MainActivity : Activity() {
         col.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
 
         // Под карточкой
-        col.addView(mono("Точные данные приходят при открытой крышке кейса.", 10f),
+        col.addView(mono(getString(R.string.hint_case), 10f),
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); marginStart = dp(8); marginEnd = dp(8) })
-        debugLabel = mono("Диагностика: —", 10f).apply { visibility = View.GONE; isAllCaps = false }
+        debugLabel = mono(getString(R.string.debug_empty), 10f).apply { visibility = View.GONE; isAllCaps = false }
         col.addView(debugLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14); marginStart = dp(8); marginEnd = dp(8) })
-        col.addView(mono("AirPods — товарный знак Apple Inc. Приложение независимое.", 9f),
+        col.addView(mono(getString(R.string.disclaimer), 9f),
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18); marginStart = dp(8); marginEnd = dp(8) })
 
         scroll.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
