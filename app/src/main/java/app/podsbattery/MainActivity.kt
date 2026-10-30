@@ -1,9 +1,6 @@
 package app.podsbattery
 
 import android.Manifest
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
-import android.animation.ValueAnimator
 import android.app.Activity
 import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothManager
@@ -25,13 +22,13 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -181,31 +178,35 @@ class MainActivity : Activity() {
 
     private val scrambleGlyphs = "01ABCDEFGHJKLMNPQRSTUVWXYZ\$#@%&*+=<>/"
 
+    /** Покадровый таймер на SystemClock: не зависит от системной настройки «Масштаб анимации». */
+    private fun runTimed(delay: Long, duration: Long, onFrame: (Float) -> Unit, onEnd: () -> Unit) {
+        val begin = SystemClock.uptimeMillis() + delay
+        val tick = object : Runnable {
+            override fun run() {
+                val f = ((SystemClock.uptimeMillis() - begin).toFloat() / duration).coerceIn(0f, 1f)
+                onFrame(f)
+                if (f >= 1f) onEnd() else handler.postDelayed(this, 16)
+            }
+        }
+        handler.postDelayed(tick, delay)
+    }
+
     /** Текст «расшифровывается» слева направо из случайных символов; до своей очереди остаётся прежним. */
     private fun scramble(delay: Long, duration: Long, target: () -> String, onText: (CharSequence) -> Unit) {
         val rnd = java.util.Random()
-        ValueAnimator.ofFloat(0f, 1f).apply {
-            startDelay = delay
-            this.duration = duration
-            interpolator = LinearInterpolator()
-            addUpdateListener {
-                val text = target()
-                val resolved = (it.animatedFraction * text.length).toInt()
-                val out = StringBuilder(text)
-                for (i in resolved until out.length) {
-                    if (!out[i].isWhitespace() && out[i] !in "·|%") out.setCharAt(i, scrambleGlyphs[rnd.nextInt(scrambleGlyphs.length)])
-                }
-                val span = SpannableString(out)
-                if (resolved < out.length) {
-                    span.setSpan(ForegroundColorSpan(Palette.MATRIX), resolved, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                }
-                onText(span)
+        runTimed(delay, duration, { f ->
+            val text = target()
+            val resolved = (f * text.length).toInt()
+            val out = StringBuilder(text)
+            for (i in resolved until out.length) {
+                if (!out[i].isWhitespace() && out[i] !in "·|%") out.setCharAt(i, scrambleGlyphs[rnd.nextInt(scrambleGlyphs.length)])
             }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) = onText(target())
-            })
-            start()
-        }
+            val span = SpannableString(out)
+            if (resolved < out.length) {
+                span.setSpan(ForegroundColorSpan(Palette.MATRIX), resolved, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            onText(span)
+        }, { onText(target()) })
     }
 
     /** Смена языка: «матричный» дождь и расшифровка текстов сверху вниз. */
@@ -229,7 +230,7 @@ class MainActivity : Activity() {
         add({ getString(R.string.btn_refresh) }) { refreshButton.text = it }
         add({ getString(R.string.hint_case) }) { hintText.text = it }
         if (debugLabel.visibility == View.VISIBLE) add({ debugMessage() }) { debugLabel.text = it }
-        add({ getString(R.string.disclaimer) }) { disclaimerText.text = it }
+        add({ disclaimerMessage() }) { disclaimerText.text = it }
 
         val total = (index - 1) * step + length
         rain.play(total + 200)
@@ -375,6 +376,11 @@ class MainActivity : Activity() {
 
     private fun renderDebug() {
         if (!switching) debugLabel.text = debugMessage()
+    }
+
+    private fun disclaimerMessage(): String {
+        val version = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { null }
+        return getString(R.string.disclaimer) + if (version != null) "  ·  v$version" else ""
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -554,7 +560,7 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); marginStart = dp(8); marginEnd = dp(8) })
         debugLabel = mono(getString(R.string.debug_empty), 10f).apply { visibility = View.GONE; isAllCaps = false }
         col.addView(debugLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14); marginStart = dp(8); marginEnd = dp(8) })
-        disclaimerText = mono(getString(R.string.disclaimer), 9f)
+        disclaimerText = mono(disclaimerMessage(), 9f)
         col.addView(disclaimerText,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18); marginStart = dp(8); marginEnd = dp(8) })
 

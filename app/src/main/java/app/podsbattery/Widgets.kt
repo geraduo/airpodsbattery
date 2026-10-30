@@ -1,16 +1,14 @@
 package app.podsbattery
 
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.os.SystemClock
 import android.view.View
 import android.view.animation.DecelerateInterpolator
-import android.view.animation.LinearInterpolator
 import kotlin.math.roundToInt
 
 object Palette {
@@ -26,7 +24,7 @@ object Palette {
     val ACCENT = 0xFFE8896A.toInt()
     val LIVE = 0xFF6CD49A.toInt()
     val RED = 0xFFE5484D.toInt()
-    val MATRIX = 0xFF22C55E.toInt()
+    val MATRIX = ACCENT
     fun forLevel(p: Int) = if (p <= 20) RED else ACCENT
 }
 
@@ -128,7 +126,10 @@ class BatteryRow(context: Context, title: String) : View(context) {
     }
 }
 
-/** Полоса «матричного дождя»: проходит по экрану один раз, сверху вниз. */
+/**
+ * Полоса «матричного дождя»: проходит по экрану один раз, сверху вниз.
+ * Работает на собственном таймере, поэтому не зависит от системной настройки «Масштаб анимации».
+ */
 class MatrixRainView(context: Context) : View(context) {
     private val d = resources.displayMetrics.density
     private val glyphs = "01ABCDEFGHJKLMNPQRSTUVWXYZ\$#@%&*+=<>/"
@@ -142,26 +143,29 @@ class MatrixRainView(context: Context) : View(context) {
     private val trails = IntArray(64) { 5 + rnd.nextInt(7) }
     private var progress = -1f
     private var frame = 0
-    private var anim: ValueAnimator? = null
+    private var startedAt = 0L
+    private var length = 1L
+
+    private val ticker = object : Runnable {
+        override fun run() {
+            val f = (SystemClock.uptimeMillis() - startedAt).toFloat() / length
+            if (f >= 1f) {
+                progress = -1f
+                invalidate()
+                return
+            }
+            progress = f
+            frame++
+            invalidate()
+            postOnAnimation(this)
+        }
+    }
 
     fun play(duration: Long) {
-        anim?.cancel()
-        anim = ValueAnimator.ofFloat(0f, 1f).apply {
-            this.duration = duration
-            interpolator = LinearInterpolator()
-            addUpdateListener {
-                progress = it.animatedValue as Float
-                frame++
-                invalidate()
-            }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    progress = -1f
-                    invalidate()
-                }
-            })
-            start()
-        }
+        removeCallbacks(ticker)
+        startedAt = SystemClock.uptimeMillis()
+        length = duration
+        post(ticker)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -178,7 +182,7 @@ class MatrixRainView(context: Context) : View(context) {
             for (k in 0 until trail) {
                 val y = head - k * cell
                 if (y < 0f || y > height + cell) continue
-                paint.alpha = if (k == 0) 235 else (180 * (1f - k / trail.toFloat())).toInt()
+                paint.alpha = if (k == 0) 220 else (140 * (1f - k / trail.toFloat())).toInt()
                 val g = glyphs[(c * 31 + k * 17 + (frame / 2) * 7) % glyphs.length]
                 canvas.drawText(g.toString(), startX + c * cell, y, paint)
             }
