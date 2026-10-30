@@ -1,6 +1,9 @@
 package app.podsbattery
 
 import android.Manifest
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothManager
@@ -12,6 +15,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
+import android.content.res.Resources
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
@@ -21,9 +25,13 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -46,6 +54,22 @@ class MainActivity : Activity() {
     private lateinit var rightRow: BatteryRow
     private lateinit var caseRow: BatteryRow
     private lateinit var debugLabel: TextView
+    private lateinit var cardTitle: TextView
+    private lateinit var diagButton: TextView
+    private lateinit var refreshButton: TextView
+    private lateinit var hintText: TextView
+    private lateinit var disclaimerText: TextView
+    private lateinit var rain: MatrixRainView
+    private val langButtons = mutableMapOf<String, TextView>()
+
+    private var lang = DEFAULT_LANG
+    private var localizedRes: Resources? = null
+    private var switching = false
+
+    private var statusRes = R.string.status_searching
+    private var statusArg: Int? = null
+    private var statusLive = false
+    private var headsetPct: Int? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private var lastSeen = 0L
@@ -74,8 +98,7 @@ class MainActivity : Activity() {
                     }
                 }
             }
-            val t = types.entries.joinToString(", ") { String.format("%02X", it.key) + "x" + it.value }
-            debugLabel.text = getString(R.string.debug_main, total, apple, pairing, t)
+            renderDebug()
         }
 
         override fun onBatchScanResults(results: MutableList<ScanResult>) {
@@ -83,14 +106,14 @@ class MainActivity : Activity() {
         }
 
         override fun onScanFailed(errorCode: Int) {
-            setStatus(getString(R.string.status_scan_error, errorCode))
+            setStatus(R.string.status_scan_error, arg = errorCode)
         }
     }
 
     private val signalWatchdog = object : Runnable {
         override fun run() {
             if (scanning && System.currentTimeMillis() - lastSeen > 8000) {
-                setStatus(getString(R.string.status_no_signal))
+                setStatus(R.string.status_no_signal)
             }
             handler.postDelayed(this, 1000)
         }
@@ -114,8 +137,7 @@ class MainActivity : Activity() {
                     k += 2
                 }
             }
-            debugLabel.text = debugLabel.text.toString().substringBefore(" | ") +
-                " | " + getString(R.string.debug_headset, headsetEvents, lastCmd)
+            renderDebug()
         }
     }
 
@@ -128,26 +150,102 @@ class MainActivity : Activity() {
         } catch (_: Exception) {}
     }
 
-    override fun attachBaseContext(base: Context) {
-        val lang = base.getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_LANG, DEFAULT_LANG) ?: DEFAULT_LANG
-        val config = Configuration(base.resources.configuration)
-        config.setLocale(Locale(lang))
-        super.attachBaseContext(base.createConfigurationContext(config))
+    // Ресурсы подменяются без пересоздания экрана, поэтому язык меняется без вспышки
+    override fun getResources(): Resources = localizedRes ?: super.getResources()
+
+    private fun applyLocale(code: String) {
+        val config = Configuration(super.getResources().configuration)
+        config.setLocale(Locale(code))
+        localizedRes = createConfigurationContext(config).resources
     }
 
-    private fun currentLang() =
-        getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_LANG, DEFAULT_LANG) ?: DEFAULT_LANG
+    private fun setLanguage(code: String) {
+        if (code == lang || switching) return
+        lang = code
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_LANG, code).apply()
+        applyLocale(code)
+        updateLanguageToggle()
+        leftRow.chargingText = getString(R.string.charging)
+        rightRow.chargingText = getString(R.string.charging)
+        caseRow.chargingText = getString(R.string.charging)
+        playLanguageTransition()
+    }
 
-    private fun setLanguage(lang: String) {
-        if (lang == currentLang()) return
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_LANG, lang).apply()
-        recreate()
+    private fun updateLanguageToggle() {
+        for ((code, button) in langButtons) {
+            val active = code == lang
+            button.setTextColor(if (active) Palette.ON_DARK else Palette.MUTED)
+            (button.background as GradientDrawable).setColor(if (active) Palette.INK else Color.TRANSPARENT)
+        }
+    }
+
+    private val scrambleGlyphs = "01ABCDEFGHJKLMNPQRSTUVWXYZ\$#@%&*+=<>/"
+
+    /** Текст «расшифровывается» слева направо из случайных символов; до своей очереди остаётся прежним. */
+    private fun scramble(delay: Long, duration: Long, target: () -> String, onText: (CharSequence) -> Unit) {
+        val rnd = java.util.Random()
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            startDelay = delay
+            this.duration = duration
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                val text = target()
+                val resolved = (it.animatedFraction * text.length).toInt()
+                val out = StringBuilder(text)
+                for (i in resolved until out.length) {
+                    if (!out[i].isWhitespace() && out[i] !in "·|%") out.setCharAt(i, scrambleGlyphs[rnd.nextInt(scrambleGlyphs.length)])
+                }
+                val span = SpannableString(out)
+                if (resolved < out.length) {
+                    span.setSpan(ForegroundColorSpan(Palette.MATRIX), resolved, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                onText(span)
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) = onText(target())
+            })
+            start()
+        }
+    }
+
+    /** Смена языка: «матричный» дождь и расшифровка текстов сверху вниз. */
+    private fun playLanguageTransition() {
+        switching = true
+        var index = 0
+        val step = 90L
+        val length = 520L
+        fun add(target: () -> String, onText: (CharSequence) -> Unit) {
+            scramble(index * step, length, target, onText)
+            index++
+        }
+        add({ chipMessage() }) { statusLabel.text = it }
+        add({ getString(R.string.card_title) }) { cardTitle.text = it }
+        add({ signalMessage() }) { signalText.text = it }
+        add({ getString(R.string.row_left) }) { leftRow.title = it.toString() }
+        add({ getString(R.string.row_right) }) { rightRow.title = it.toString() }
+        add({ getString(R.string.row_case) }) { caseRow.title = it.toString() }
+        if (headsetPct != null) add({ headsetMessage() }) { headsetText.text = it }
+        add({ getString(R.string.btn_diagnostics) }) { diagButton.text = it }
+        add({ getString(R.string.btn_refresh) }) { refreshButton.text = it }
+        add({ getString(R.string.hint_case) }) { hintText.text = it }
+        if (debugLabel.visibility == View.VISIBLE) add({ debugMessage() }) { debugLabel.text = it }
+        add({ getString(R.string.disclaimer) }) { disclaimerText.text = it }
+
+        val total = (index - 1) * step + length
+        rain.play(total + 200)
+        handler.postDelayed({
+            switching = false
+            renderStatus()
+            renderDebug()
+        }, total + 50)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        lang = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_LANG, DEFAULT_LANG) ?: DEFAULT_LANG
+        applyLocale(lang)
         buildUi()
-        setStatus(getString(R.string.status_searching))
+        setStatus(R.string.status_searching)
     }
 
     override fun onResume() {
@@ -166,7 +264,7 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, perms, results)
-        if (hasPermissions()) startScan() else setStatus(getString(R.string.status_need_permission))
+        if (hasPermissions()) startScan() else setStatus(R.string.status_need_permission)
     }
 
     private fun neededPermissions(): Array<String> =
@@ -186,12 +284,12 @@ class MainActivity : Activity() {
         if (scanning) return
         val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
         if (adapter == null || !adapter.isEnabled) {
-            setStatus(getString(R.string.status_bt_off))
+            setStatus(R.string.status_bt_off)
             return
         }
         val lm = getSystemService(LOCATION_SERVICE) as LocationManager
         if (Build.VERSION.SDK_INT >= 28 && !lm.isLocationEnabled) {
-            setStatus(getString(R.string.status_location_off))
+            setStatus(R.string.status_location_off)
             return
         }
         val settings = ScanSettings.Builder()
@@ -202,9 +300,9 @@ class MainActivity : Activity() {
             adapter.bluetoothLeScanner.startScan(null, settings, callback)
             scanning = true
             lastSeen = System.currentTimeMillis()
-            setStatus(getString(R.string.status_searching))
+            setStatus(R.string.status_searching)
         } catch (e: SecurityException) {
-            setStatus(getString(R.string.status_no_permission))
+            setStatus(R.string.status_no_permission)
         }
     }
 
@@ -252,7 +350,7 @@ class MainActivity : Activity() {
             0x1420 -> "AirPods Pro 2"
             else -> "AirPods"
         }
-        setStatus(getString(R.string.status_connected), true)
+        setStatus(R.string.status_connected, true)
         leftRow.setLevel(percent(leftV), chargeL)
         rightRow.setLevel(percent(rightV), chargeR)
         caseRow.setLevel(percent(caseV), chargeC)
@@ -260,18 +358,45 @@ class MainActivity : Activity() {
 
     private fun percent(raw: Int): Int? = if (raw in 0..10) raw * 10 else null
 
+    private fun headsetMessage() = headsetPct?.let { getString(R.string.headset_level, it) } ?: ""
+
     private fun showHeadsetLevel(pct: Int) {
+        headsetPct = pct
         headsetText.visibility = View.VISIBLE
-        headsetText.text = getString(R.string.headset_level, pct)
+        if (!switching) headsetText.text = headsetMessage()
+    }
+
+    private fun debugMessage(): String {
+        if (total == 0 && headsetEvents == 0) return getString(R.string.debug_empty)
+        val t = types.entries.joinToString(", ") { String.format("%02X", it.key) + "x" + it.value }
+        val main = getString(R.string.debug_main, total, apple, pairing, t)
+        return if (headsetEvents > 0) main + " | " + getString(R.string.debug_headset, headsetEvents, lastCmd) else main
+    }
+
+    private fun renderDebug() {
+        if (!switching) debugLabel.text = debugMessage()
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun setStatus(text: String, live: Boolean = false) {
+    private fun setStatus(res: Int, live: Boolean = false, arg: Int? = null) {
+        statusRes = res
+        statusArg = arg
+        statusLive = live
+        renderStatus()
+    }
+
+    private fun signalMessage(): String = statusArg?.let { getString(statusRes, it) } ?: getString(statusRes)
+
+    private fun chipMessage(): String = getString(if (statusLive) R.string.chip_live else R.string.chip_searching)
+
+    private fun renderStatus() {
         if (!::signalText.isInitialized) return
-        signalText.text = text
-        statusLabel.text = getString(if (live) R.string.chip_live else R.string.chip_searching)
-        (statusDot.background as GradientDrawable).setColor(if (live) Palette.LIVE else Palette.ACCENT)
+        if (!switching) {
+            signalText.text = signalMessage()
+            statusLabel.text = chipMessage()
+        }
+        (statusDot.background as GradientDrawable).setColor(if (statusLive) Palette.LIVE else Palette.ACCENT)
     }
 
     private fun tv(
@@ -312,15 +437,17 @@ class MainActivity : Activity() {
             setStroke(dp(1), Palette.LINE)
         }
         for ((code, label) in listOf("en" to "EN", "ru" to "RU")) {
-            val active = code == currentLang()
-            addView(mono(label, 10f, if (active) Palette.ON_DARK else Palette.MUTED, true).apply {
+            val active = code == lang
+            val button = mono(label, 10f, if (active) Palette.ON_DARK else Palette.MUTED, true).apply {
                 setPadding(dp(9), dp(6), dp(9), dp(6))
                 background = GradientDrawable().apply {
                     cornerRadius = dp(100).toFloat()
                     setColor(if (active) Palette.INK else Color.TRANSPARENT)
                 }
                 setOnClickListener { setLanguage(code) }
-            })
+            }
+            langButtons[code] = button
+            addView(button)
         }
     }
 
@@ -386,7 +513,8 @@ class MainActivity : Activity() {
                 intArrayOf(0xFF3B2B23.toInt(), 0xFF1F1D1B.toInt(), Palette.INK)
             ).apply { cornerRadius = dp(36).toFloat() }
         }
-        card.addView(mono(getString(R.string.card_title), 10f, Palette.MUTED_DARK))
+        cardTitle = mono(getString(R.string.card_title), 10f, Palette.MUTED_DARK)
+        card.addView(cardTitle)
         modelTitle = tv("AirPods", 34f, Palette.ON_DARK, "sans-serif", Typeface.BOLD, -0.03f)
         card.addView(modelTitle, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(12) })
         signalText = tv(getString(R.string.status_searching), 13f, Palette.MUTED_DARK)
@@ -404,32 +532,36 @@ class MainActivity : Activity() {
         headsetText = mono("", 10f, Palette.MUTED_DARK).apply { visibility = View.GONE; isAllCaps = false }
         card.addView(headsetText, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(18) })
 
-        val restart = pill(getString(R.string.btn_refresh), Palette.BG, Palette.INK, Palette.ON_DARK).apply {
+        refreshButton = pill(getString(R.string.btn_refresh), Palette.BG, Palette.INK, Palette.ON_DARK).apply {
             setOnClickListener { stopScan(); startScan() }
         }
-        val diag = pill(getString(R.string.btn_diagnostics), Color.TRANSPARENT, Palette.ON_DARK, Palette.LINE_DARK).apply {
+        diagButton = pill(getString(R.string.btn_diagnostics), Color.TRANSPARENT, Palette.ON_DARK, Palette.LINE_DARK).apply {
             setOnClickListener {
                 debugLabel.visibility = if (debugLabel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
             }
         }
         val buttons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            addView(diag)
-            addView(restart, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
+            addView(diagButton)
+            addView(refreshButton, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
         }
         card.addView(buttons, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(24) })
         col.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
 
         // Под карточкой
-        col.addView(mono(getString(R.string.hint_case), 10f),
+        hintText = mono(getString(R.string.hint_case), 10f)
+        col.addView(hintText,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); marginStart = dp(8); marginEnd = dp(8) })
         debugLabel = mono(getString(R.string.debug_empty), 10f).apply { visibility = View.GONE; isAllCaps = false }
         col.addView(debugLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14); marginStart = dp(8); marginEnd = dp(8) })
-        col.addView(mono(getString(R.string.disclaimer), 9f),
+        disclaimerText = mono(getString(R.string.disclaimer), 9f)
+        col.addView(disclaimerText,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18); marginStart = dp(8); marginEnd = dp(8) })
 
         scroll.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(scroll)
+        rain = MatrixRainView(this)
+        root.addView(rain, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
     }
 }

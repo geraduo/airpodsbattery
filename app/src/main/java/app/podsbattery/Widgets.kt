@@ -1,5 +1,7 @@
 package app.podsbattery
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
@@ -8,6 +10,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.view.View
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.LinearInterpolator
 import kotlin.math.roundToInt
 
 object Palette {
@@ -23,13 +26,17 @@ object Palette {
     val ACCENT = 0xFFE8896A.toInt()
     val LIVE = 0xFF6CD49A.toInt()
     val RED = 0xFFE5484D.toInt()
+    val MATRIX = 0xFF22C55E.toInt()
     fun forLevel(p: Int) = if (p <= 20) RED else ACCENT
 }
 
 /** Строка заряда на тёмной карточке: число, подпись и 10 сегментов (как «пиксели» на сайте). */
-class BatteryRow(context: Context, private val title: String) : View(context) {
+class BatteryRow(context: Context, title: String) : View(context) {
     private val d = resources.displayMetrics.density
-    private val chargingText = context.getString(R.string.charging)
+    var title: String = title
+        set(value) { field = value; invalidate() }
+    var chargingText: String = context.getString(R.string.charging)
+        set(value) { field = value; invalidate() }
     private val numPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.create("sans-serif", Typeface.BOLD)
         letterSpacing = -0.03f
@@ -116,6 +123,64 @@ class BatteryRow(context: Context, private val title: String) : View(context) {
                 fill.color = Palette.forLevel(level)
                 fill.alpha = (a * 255).toInt()
                 canvas.drawRoundRect(rect, 2.5f * d, 2.5f * d, fill)
+            }
+        }
+    }
+}
+
+/** Полоса «матричного дождя»: проходит по экрану один раз, сверху вниз. */
+class MatrixRainView(context: Context) : View(context) {
+    private val d = resources.displayMetrics.density
+    private val glyphs = "01ABCDEFGHJKLMNPQRSTUVWXYZ\$#@%&*+=<>/"
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create("monospace", Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+        color = Palette.MATRIX
+    }
+    private val rnd = java.util.Random(7)
+    private val shifts = FloatArray(64) { rnd.nextFloat() }
+    private val trails = IntArray(64) { 5 + rnd.nextInt(7) }
+    private var progress = -1f
+    private var frame = 0
+    private var anim: ValueAnimator? = null
+
+    fun play(duration: Long) {
+        anim?.cancel()
+        anim = ValueAnimator.ofFloat(0f, 1f).apply {
+            this.duration = duration
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                progress = it.animatedValue as Float
+                frame++
+                invalidate()
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    progress = -1f
+                    invalidate()
+                }
+            })
+            start()
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        if (progress < 0f) return
+        val cell = 15 * d
+        paint.textSize = 13 * d
+        val cols = minOf((width / cell).toInt(), shifts.size)
+        val startX = (width - cols * cell) / 2f + cell / 2f
+        val travel = height + 14 * cell
+        for (c in 0 until cols) {
+            // небольшой разброс по высоте делает фронт дождя неровным
+            val head = progress * travel - shifts[c] * 4 * cell
+            val trail = trails[c]
+            for (k in 0 until trail) {
+                val y = head - k * cell
+                if (y < 0f || y > height + cell) continue
+                paint.alpha = if (k == 0) 235 else (180 * (1f - k / trail.toFloat())).toInt()
+                val g = glyphs[(c * 31 + k * 17 + (frame / 2) * 7) % glyphs.length]
+                canvas.drawText(g.toString(), startX + c * cell, y, paint)
             }
         }
     }
