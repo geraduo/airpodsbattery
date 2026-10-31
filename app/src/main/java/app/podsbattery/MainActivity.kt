@@ -650,9 +650,14 @@ class MainActivity : Activity() {
             addView(developerText)
             setOnClickListener { openRepo() }
         }
-        col.addView(developerRow, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(22); marginStart = dp(8) })
+        // Распорка прижимает подвал к низу экрана, плитка и подпись стоят по центру
+        col.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
+        col.addView(developerRow, LinearLayout.LayoutParams(-2, -2).apply {
+            topMargin = dp(24)
+            gravity = Gravity.CENTER_HORIZONTAL
+        })
 
-        disclaimerText = mono(disclaimerMessage(), 9f)
+        disclaimerText = mono(disclaimerMessage(), 9f).apply { gravity = Gravity.CENTER }
         col.addView(disclaimerText,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18); marginStart = dp(8); marginEnd = dp(8) })
 
