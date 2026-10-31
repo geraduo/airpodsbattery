@@ -11,8 +11,8 @@ android {
         applicationId = "app.podsbattery"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.5"
+        versionCode = 8
+        versionName = "1.6"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

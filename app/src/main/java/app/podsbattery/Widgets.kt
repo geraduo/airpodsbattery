@@ -298,16 +298,31 @@ class ThemeButton(context: Context) : View(context) {
 }
 
 /**
- * Фон из скруглённых квадратиков, как на сайте: ровная сетка с бледными контурами.
- * Квадратики возле пальца слегка поворачиваются и плавно возвращаются на место.
+ * Фон из скруглённых квадратиков в 2.5D: плоскость с сеткой наклонена в перспективе,
+ * левый край ближе (крупнее), правый дальше (мельче и бледнее).
+ * Возле пальца квадратики приподнимаются к зрителю и слегка поворачиваются, потом плавно возвращаются.
  */
 class PatternView(context: Context) : View(context) {
     private val d = resources.displayMetrics.density
     private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 2f * d
+        strokeJoin = Paint.Join.ROUND
     }
-    private val rect = RectF()
+    private val path = Path()
+
+    // Контур скруглённого квадрата в локальных координатах: по шесть точек на каждый угол
+    private val local: FloatArray
+
+    // Наклон плоскости и «камера»
+    private val cosY = cos(Math.toRadians(32.0)).toFloat()
+    private val sinY = sin(Math.toRadians(32.0)).toFloat()
+    private val cosX = cos(Math.toRadians(10.0)).toFloat()
+    private val sinX = sin(Math.toRadians(10.0)).toFloat()
+    private val focal = 400f * d
+    private var centerX = 0f
+    private var centerY = 0f
+    private val mid = FloatArray(3)
+    private val pt = FloatArray(3)
 
     private var touching = false
     private var targetX = 0f
@@ -316,6 +331,25 @@ class PatternView(context: Context) : View(context) {
     private var fingerY = 0f
     private var strength = 0f
     private var running = false
+
+    init {
+        val half = 25f * d
+        val r = 14f * d
+        val inner = half - r
+        val centers = arrayOf(
+            floatArrayOf(inner, inner), floatArrayOf(-inner, inner),
+            floatArrayOf(-inner, -inner), floatArrayOf(inner, -inner)
+        )
+        val pts = ArrayList<Float>()
+        for (k in 0 until 4) {
+            for (i in 0..5) {
+                val a = Math.toRadians(90.0 * k + 90.0 * i / 5)
+                pts.add(centers[k][0] + r * cos(a).toFloat())
+                pts.add(centers[k][1] + r * sin(a).toFloat())
+            }
+        }
+        local = pts.toFloatArray()
+    }
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -361,41 +395,84 @@ class PatternView(context: Context) : View(context) {
         super.onDetachedFromWindow()
     }
 
-    override fun onDraw(canvas: Canvas) {
-        val pitch = 76f * d
-        val size = 50f * d
-        val radius = 14f * d
-        val cols = (width / pitch).toInt() + 1
-        val rows = (height / pitch).toInt() + 1
-        val startX = (width - (cols - 1) * pitch) / 2f
-        val startY = (height - (rows - 1) * pitch) / 2f
-        val reach = 160f * d
+    /** Точка плоскости (x, y) с подъёмом z: поворот вокруг Y и X, затем перспектива. out = [экранный x, экранный y, масштаб]. */
+    private fun project(x: Float, y: Float, z: Float, out: FloatArray): Boolean {
+        val x1 = x * cosY + z * sinY
+        val z1 = -x * sinY + z * cosY
+        val y2 = y * cosX - z1 * sinX
+        val z2 = y * sinX + z1 * cosX
+        val depth = focal - z2
+        if (depth < 60f * d) return false
+        val k = focal / depth
+        out[0] = centerX + x1 * k
+        out[1] = centerY + y2 * k
+        out[2] = k
+        return true
+    }
 
-        for (r in 0 until rows) {
-            for (c in 0 until cols) {
-                val cx = startX + c * pitch
-                val cy = startY + r * pitch
+    private fun withAlpha(color: Int, factor: Float): Int =
+        (color and 0x00FFFFFF) or (((color ushr 24) * factor).toInt() shl 24)
+
+    override fun onDraw(canvas: Canvas) {
+        centerX = width / 2f
+        centerY = height / 2f
+        val pitch = 76f * d
+        val reach = 160f * d
+        val margin = 90f * d
+
+        for (r in -9..9) {
+            for (c in -6..6) {
+                val wx = c * pitch
+                val wy = r * pitch
+                if (!project(wx, wy, 0f, mid)) continue
+                if (mid[0] < -margin || mid[0] > width + margin || mid[1] < -margin || mid[1] > height + margin) continue
+
                 var angle = 0f
+                var lift = 0f
                 if (strength > 0f) {
-                    val dx = cx - fingerX
-                    val dy = cy - fingerY
+                    val dx = mid[0] - fingerX
+                    val dy = mid[1] - fingerY
                     val dist = sqrt(dx * dx + dy * dy)
                     if (dist < reach) {
                         val k = 1f - dist / reach
                         angle = 20f * k * k * strength
+                        lift = 44f * d * k * k * strength
                     }
                 }
-                canvas.save()
-                canvas.rotate(angle, cx, cy)
-                rect.set(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f)
+                val rad = Math.toRadians(angle.toDouble())
+                val ca = cos(rad).toFloat()
+                val sa = sin(rad).toFloat()
 
-                rect.offset(-1.5f * d, -1.5f * d)
-                outline.color = Palette.PATTERN_HI
-                canvas.drawRoundRect(rect, radius, radius, outline)
-                rect.offset(1.5f * d, 1.5f * d)
-                outline.color = Palette.PATTERN
-                canvas.drawRoundRect(rect, radius, radius, outline)
+                path.reset()
+                var ok = true
+                var i = 0
+                while (i < local.size) {
+                    val lx = local[i]
+                    val ly = local[i + 1]
+                    val px = wx + lx * ca - ly * sa
+                    val py = wy + lx * sa + ly * ca
+                    if (!project(px, py, lift, pt)) {
+                        ok = false
+                        break
+                    }
+                    if (i == 0) path.moveTo(pt[0], pt[1]) else path.lineTo(pt[0], pt[1])
+                    i += 2
+                }
+                if (!ok) continue
+                path.close()
+
+                val scale = mid[2]
+                val fade = ((scale - 0.55f) / 0.6f).coerceIn(0.35f, 1f)
+                outline.strokeWidth = 2f * d * scale
+
+                canvas.save()
+                canvas.translate(-1.5f * d * scale, -1.5f * d * scale)
+                outline.color = withAlpha(Palette.PATTERN_HI, fade)
+                canvas.drawPath(path, outline)
                 canvas.restore()
+
+                outline.color = withAlpha(Palette.PATTERN, fade)
+                canvas.drawPath(path, outline)
             }
         }
     }

@@ -30,7 +30,7 @@ Everything runs locally: the app only needs Bluetooth and never uses the interne
 - Model detection (AirPods, AirPods 2, AirPods 3, AirPods Pro, AirPods Pro 2)
 - Overall battery level of connected earbuds, when the system passes it to the app
 - Animated spark icon that is lively while searching and calm when data is live
-- Light and dark themes with a toggle in the top bar, on a soft grid of rounded squares that tilt slightly under your finger
+- Light and dark themes with a toggle in the top bar, on a soft 2.5D grid of rounded squares that lift and tilt under your finger
 - Remembers the last known values and shows how long ago they were updated, so the screen is never empty on launch
 - Built-in diagnostics: shows which packets the phone is receiving
 - Two interface languages: English (default) and Russian, switched with the **EN / RU** toggle in the top bar; the choice is remembered
