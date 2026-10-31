@@ -8,11 +8,13 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 object Palette {
     // Постоянные цвета: тёмная карточка, акценты и всё, что лежит на карточке
@@ -295,7 +297,10 @@ class ThemeButton(context: Context) : View(context) {
     }
 }
 
-/** Фон из скруглённых квадратиков, как на сайте: бледные контуры с мягким бликом. */
+/**
+ * Фон из скруглённых квадратиков, как на сайте: ровная сетка с бледными контурами.
+ * Квадратики возле пальца слегка поворачиваются и плавно возвращаются на место.
+ */
 class PatternView(context: Context) : View(context) {
     private val d = resources.displayMetrics.density
     private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -304,39 +309,160 @@ class PatternView(context: Context) : View(context) {
     }
     private val rect = RectF()
 
-    private fun rnd(c: Int, r: Int, salt: Int): Float {
-        var x = c * 73856093 xor r * 19349663 xor salt * 83492791
-        x = x xor (x ushr 13)
-        x *= 1274126177
-        x = x xor (x ushr 16)
-        return (x and 0xFFFF) / 65535f
+    private var touching = false
+    private var targetX = 0f
+    private var targetY = 0f
+    private var fingerX = 0f
+    private var fingerY = 0f
+    private var strength = 0f
+    private var running = false
+
+    private val ticker = object : Runnable {
+        override fun run() {
+            fingerX += (targetX - fingerX) * 0.25f
+            fingerY += (targetY - fingerY) * 0.25f
+            strength += ((if (touching) 1f else 0f) - strength) * 0.16f
+            invalidate()
+            if (touching || strength > 0.01f) {
+                postOnAnimation(this)
+            } else {
+                strength = 0f
+                running = false
+                invalidate()
+            }
+        }
     }
 
-    private fun withAlpha(color: Int, factor: Float): Int =
-        (color and 0x00FFFFFF) or (((color ushr 24) * factor).toInt() shl 24)
+    /** Принимает координаты касания в системе этого элемента; сами события при этом не перехватываются. */
+    fun touch(x: Float, y: Float, action: Int) {
+        when (action) {
+            MotionEvent.ACTION_DOWN -> {
+                touching = true
+                targetX = x
+                targetY = y
+                fingerX = x
+                fingerY = y
+            }
+            MotionEvent.ACTION_MOVE -> {
+                targetX = x
+                targetY = y
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> touching = false
+        }
+        if (!running) {
+            running = true
+            postOnAnimation(ticker)
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(ticker)
+        running = false
+        super.onDetachedFromWindow()
+    }
 
     override fun onDraw(canvas: Canvas) {
-        val pitch = 84f * d
-        val cols = (width / pitch).toInt() + 2
-        val rows = (height / pitch).toInt() + 2
+        val pitch = 76f * d
+        val size = 50f * d
+        val radius = 14f * d
+        val cols = (width / pitch).toInt() + 1
+        val rows = (height / pitch).toInt() + 1
+        val startX = (width - (cols - 1) * pitch) / 2f
+        val startY = (height - (rows - 1) * pitch) / 2f
+        val reach = 160f * d
+
         for (r in 0 until rows) {
             for (c in 0 until cols) {
-                if (rnd(c, r, 1) < 0.3f) continue
-                val size = (44f + 20f * rnd(c, r, 2)) * d
-                val shift = if (r % 2 == 0) 0f else pitch / 2f
-                val cx = c * pitch + shift + (rnd(c, r, 3) - 0.5f) * 18f * d
-                val cy = r * pitch + (rnd(c, r, 4) - 0.5f) * 18f * d
-                val strength = 0.35f + 0.55f * rnd(c, r, 5)
-                val radius = size * 0.28f
+                val cx = startX + c * pitch
+                val cy = startY + r * pitch
+                var angle = 0f
+                if (strength > 0f) {
+                    val dx = cx - fingerX
+                    val dy = cy - fingerY
+                    val dist = sqrt(dx * dx + dy * dy)
+                    if (dist < reach) {
+                        val k = 1f - dist / reach
+                        angle = 20f * k * k * strength
+                    }
+                }
+                canvas.save()
+                canvas.rotate(angle, cx, cy)
                 rect.set(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f)
 
                 rect.offset(-1.5f * d, -1.5f * d)
-                outline.color = withAlpha(Palette.PATTERN_HI, strength)
+                outline.color = Palette.PATTERN_HI
                 canvas.drawRoundRect(rect, radius, radius, outline)
                 rect.offset(1.5f * d, 1.5f * d)
-                outline.color = withAlpha(Palette.PATTERN, strength)
+                outline.color = Palette.PATTERN
                 canvas.drawRoundRect(rect, radius, radius, outline)
+                canvas.restore()
             }
         }
+    }
+}
+
+/**
+ * Анимированный значок-«искра»: лучи пульсируют и медленно вращаются, как индикатор размышления.
+ * Пока идёт поиск, он оживлённее, при живых данных успокаивается.
+ */
+class SparkView(context: Context) : View(context) {
+    private val d = resources.displayMetrics.density
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Palette.ACCENT
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+    var busy = true
+    private var phase = 0f
+    private var angle = 0f
+    private var last = 0L
+
+    private val ticker = object : Runnable {
+        override fun run() {
+            val now = SystemClock.uptimeMillis()
+            val dt = if (last == 0L) 16L else minOf(now - last, 64L)
+            last = now
+            val speed = if (busy) 1f else 0.35f
+            phase += dt / 1000f * speed * (2f * Math.PI.toFloat() / 1.6f)
+            angle += dt / 1000f * speed * 40f
+            invalidate()
+            postOnAnimation(this)
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        last = 0L
+        postOnAnimation(ticker)
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(ticker)
+        super.onDetachedFromWindow()
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        setMeasuredDimension((30 * d).toInt(), (30 * d).toInt())
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val cx = width / 2f
+        val cy = height / 2f
+        val radius = minOf(width, height) / 2f - d
+        paint.strokeWidth = radius * 0.2f
+        val rays = 10
+        canvas.save()
+        canvas.rotate(angle, cx, cy)
+        for (i in 0 until rays) {
+            val a = i * 2f * Math.PI.toFloat() / rays
+            val pulse = 0.5f + 0.5f * sin(phase + i * 0.9f)
+            val length = radius * (0.45f + 0.55f * pulse)
+            val inner = radius * 0.2f
+            canvas.drawLine(
+                cx + cos(a) * inner, cy + sin(a) * inner,
+                cx + cos(a) * length, cy + sin(a) * length, paint
+            )
+        }
+        canvas.restore()
     }
 }

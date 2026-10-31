@@ -30,6 +30,7 @@ import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsetsController
@@ -63,6 +64,8 @@ class MainActivity : Activity() {
     private lateinit var updatedText: TextView
     private lateinit var statusPill: LinearLayout
     private lateinit var host: FrameLayout
+    private lateinit var spark: SparkView
+    private lateinit var pattern: PatternView
     private var themeSwitching = false
     private var debugVisible = false
     private lateinit var developerRow: LinearLayout
@@ -302,6 +305,15 @@ class MainActivity : Activity() {
         setStatus(R.string.status_searching)
     }
 
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (::pattern.isInitialized) {
+            val loc = IntArray(2)
+            pattern.getLocationOnScreen(loc)
+            pattern.touch(ev.rawX - loc[0], ev.rawY - loc[1], ev.actionMasked)
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     /** Цвета и значки строки состояния и панели навигации подстраиваются под тему. */
     private fun applySystemBars() {
         window.setBackgroundDrawable(ColorDrawable(Palette.BG))
@@ -532,6 +544,7 @@ class MainActivity : Activity() {
             statusLabel.text = chipMessage()
         }
         (statusDot.background as GradientDrawable).setColor(if (statusLive) Palette.LIVE else Palette.ACCENT)
+        spark.busy = !statusLive
         renderUpdated()
     }
 
@@ -592,7 +605,8 @@ class MainActivity : Activity() {
 
     private fun buildUi(): View {
         val root = FrameLayout(this).apply { setBackgroundColor(Palette.BG) }
-        root.addView(PatternView(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        pattern = PatternView(this)
+        root.addView(pattern, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             overScrollMode = View.OVER_SCROLL_NEVER
@@ -603,15 +617,7 @@ class MainActivity : Activity() {
         }
 
         // Верхняя «плавающая» панель
-        val logo = FrameLayout(this).apply {
-            background = GradientDrawable().apply {
-                cornerRadius = dp(9).toFloat()
-                setColor(Color.TRANSPARENT)
-                setStroke(dp(1), Palette.TEXT)
-            }
-            addView(View(this@MainActivity).apply { background = oval(Palette.ACCENT) },
-                FrameLayout.LayoutParams(dp(8), dp(8), Gravity.CENTER))
-        }
+        spark = SparkView(this)
         statusDot = View(this).apply { background = oval(Palette.ACCENT) }
         statusLabel = mono(getString(R.string.chip_searching), 10f, Palette.PILL_TEXT, true).apply { isSingleLine = true }
         statusPill = LinearLayout(this).apply {
@@ -634,7 +640,7 @@ class MainActivity : Activity() {
                 setColor(Palette.BAR)
                 setStroke(dp(1), Palette.LINE)
             }
-            addView(logo, LinearLayout.LayoutParams(dp(30), dp(30)))
+            addView(spark, LinearLayout.LayoutParams(dp(30), dp(30)))
             addView(mono("AirPods", 12f, Palette.TEXT, true).apply { isSingleLine = true },
                 LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
             addView(languageToggle(), LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
