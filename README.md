@@ -29,6 +29,7 @@ Everything runs locally: the app only needs Bluetooth and never uses the interne
 - Charging indicator for each device
 - Model detection (AirPods, AirPods 2, AirPods 3, AirPods Pro, AirPods Pro 2)
 - Overall battery level of connected earbuds, when the system passes it to the app
+- Remembers the last known values and shows how long ago they were updated, so the screen is never empty on launch
 - Built-in diagnostics: shows which packets the phone is receiving
 - Two interface languages: English (default) and Russian, switched with the **EN / RU** toggle in the top bar; the choice is remembered
 - No third-party libraries: plain Android SDK, the UI is built in code
@@ -131,8 +132,10 @@ Press the **Diagnostics** button on the main screen. The line it shows tells you
 │   └── src/main/
 │       ├── AndroidManifest.xml
 │       ├── java/app/podsbattery/
-│       │   ├── MainActivity.kt      scanning, packet parsing, UI
-│       │   └── Widgets.kt           palette and battery indicator
+│       │   ├── MainActivity.kt      main screen, language switch
+│       │   ├── PodsParser.kt        Apple packet parsing
+│       │   ├── Prefs.kt             settings and language
+│       │   └── Widgets.kt           palette, indicators, effects
 │       └── res/                     theme, colors, icon, strings (en, ru)
 ├── build.gradle.kts
 └── settings.gradle.kts

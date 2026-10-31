@@ -18,6 +18,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -26,19 +27,19 @@ import android.os.SystemClock
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import java.util.Locale
 
-private const val APPLE_COMPANY_ID = 0x004C
-private const val PREFS = "settings"
-private const val KEY_LANG = "lang"
-private const val DEFAULT_LANG = "en"
+private const val DEVELOPER = "geraduo"
+private const val REPO_URL = "https://github.com/geraduo/airpodsbattery"
 
 class MainActivity : Activity() {
 
@@ -56,10 +57,14 @@ class MainActivity : Activity() {
     private lateinit var refreshButton: TextView
     private lateinit var hintText: TextView
     private lateinit var disclaimerText: TextView
+    private lateinit var developerText: TextView
+    private lateinit var updatedText: TextView
+    private lateinit var statusPill: LinearLayout
+    private lateinit var developerRow: LinearLayout
     private lateinit var rain: MatrixRainView
     private val langButtons = mutableMapOf<String, TextView>()
 
-    private var lang = DEFAULT_LANG
+    private var lang = Prefs.DEFAULT_LANG
     private var localizedRes: Resources? = null
     private var switching = false
 
@@ -67,6 +72,10 @@ class MainActivity : Activity() {
     private var statusArg: Int? = null
     private var statusLive = false
     private var headsetPct: Int? = null
+
+    private var lastState: PodsState? = null
+    private var savedState: PodsState? = null
+    private var lastDataAt = 0L
 
     private val handler = Handler(Looper.getMainLooper())
     private var lastSeen = 0L
@@ -82,7 +91,7 @@ class MainActivity : Activity() {
     private val callback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             total++
-            val data = result.scanRecord?.getManufacturerSpecificData(APPLE_COMPANY_ID)
+            val data = result.scanRecord?.getManufacturerSpecificData(PodsParser.APPLE_COMPANY_ID)
             if (data != null) {
                 apple++
                 if (data.isNotEmpty()) {
@@ -112,6 +121,7 @@ class MainActivity : Activity() {
             if (scanning && System.currentTimeMillis() - lastSeen > 8000) {
                 setStatus(R.string.status_no_signal)
             }
+            renderUpdated()
             handler.postDelayed(this, 1000)
         }
     }
@@ -159,7 +169,7 @@ class MainActivity : Activity() {
     private fun setLanguage(code: String) {
         if (code == lang || switching) return
         lang = code
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_LANG, code).apply()
+        Prefs.setLang(this, code)
         applyLocale(code)
         updateLanguageToggle()
         leftRow.chargingText = getString(R.string.charging)
@@ -192,10 +202,24 @@ class MainActivity : Activity() {
     }
 
     /** Текст «расшифровывается» слева направо из случайных символов; до своей очереди остаётся прежним. */
-    private fun scramble(delay: Long, duration: Long, target: () -> String, onText: (CharSequence) -> Unit) {
+    private fun scramble(
+        delay: Long, duration: Long, target: () -> String, tile: View?, onText: (CharSequence) -> Unit
+    ) {
         val rnd = java.util.Random()
+        var started = false
+        var fromWidth = 0
+        var toWidth = 0
         runTimed(delay, duration, { f ->
             val text = target()
+            if (tile != null && !started) {
+                // Узнаём будущую ширину плитки по итоговому тексту, чтобы растянуть её плавно, а не рывком
+                started = true
+                fromWidth = tile.width
+                onText(text)
+                tile.layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                tile.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+                toWidth = tile.measuredWidth
+            }
             val resolved = (f * text.length).toInt()
             val out = StringBuilder(text)
             for (i in resolved until out.length) {
@@ -206,7 +230,18 @@ class MainActivity : Activity() {
                 span.setSpan(ForegroundColorSpan(Palette.MATRIX), resolved, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
             onText(span)
-        }, { onText(target()) })
+            if (tile != null && fromWidth > 0) {
+                val e = f * f * (3f - 2f * f)
+                tile.layoutParams.width = (fromWidth + (toWidth - fromWidth) * e).toInt()
+                tile.requestLayout()
+            }
+        }, {
+            onText(target())
+            if (tile != null) {
+                tile.layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                tile.requestLayout()
+            }
+        })
     }
 
     /** Смена языка: «матричный» дождь и расшифровка текстов сверху вниз. */
@@ -215,21 +250,23 @@ class MainActivity : Activity() {
         var index = 0
         val step = 90L
         val length = 520L
-        fun add(target: () -> String, onText: (CharSequence) -> Unit) {
-            scramble(index * step, length, target, onText)
+        fun add(target: () -> String, tile: View? = null, onText: (CharSequence) -> Unit) {
+            scramble(index * step, length, target, tile, onText)
             index++
         }
-        add({ chipMessage() }) { statusLabel.text = it }
+        add({ chipMessage() }, statusPill) { statusLabel.text = it }
         add({ getString(R.string.card_title) }) { cardTitle.text = it }
         add({ signalMessage() }) { signalText.text = it }
+        if (updatedText.visibility == View.VISIBLE) add({ updatedMessage() }) { updatedText.text = it }
         add({ getString(R.string.row_left) }) { leftRow.title = it.toString() }
         add({ getString(R.string.row_right) }) { rightRow.title = it.toString() }
         add({ getString(R.string.row_case) }) { caseRow.title = it.toString() }
         if (headsetPct != null) add({ headsetMessage() }) { headsetText.text = it }
-        add({ getString(R.string.btn_diagnostics) }) { diagButton.text = it }
-        add({ getString(R.string.btn_refresh) }) { refreshButton.text = it }
+        add({ getString(R.string.btn_diagnostics) }, diagButton) { diagButton.text = it }
+        add({ getString(R.string.btn_refresh) }, refreshButton) { refreshButton.text = it }
         add({ getString(R.string.hint_case) }) { hintText.text = it }
         if (debugLabel.visibility == View.VISIBLE) add({ debugMessage() }) { debugLabel.text = it }
+        add({ developerMessage() }, developerRow) { developerText.text = if (it is SpannableString) it else styleDeveloper(it.toString()) }
         add({ disclaimerMessage() }) { disclaimerText.text = it }
 
         val total = (index - 1) * step + length
@@ -238,14 +275,21 @@ class MainActivity : Activity() {
             switching = false
             renderStatus()
             renderDebug()
+            renderUpdated()
         }, total + 50)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        lang = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_LANG, DEFAULT_LANG) ?: DEFAULT_LANG
+        lang = Prefs.lang(this)
         applyLocale(lang)
         buildUi()
+        Prefs.loadLast(this)?.let { (state, time) ->
+            lastState = state
+            savedState = state
+            lastDataAt = time
+            applyState(state)
+        }
         setStatus(R.string.status_searching)
     }
 
@@ -258,6 +302,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        lastState?.let { if (lastDataAt > 0) Prefs.saveLast(this, it, lastDataAt) }
         try { unregisterReceiver(headsetReceiver) } catch (_: Exception) {}
         stopScan()
         handler.removeCallbacks(signalWatchdog)
@@ -316,48 +361,54 @@ class MainActivity : Activity() {
         scanning = false
     }
 
-    /**
-     * Разбор рекламного пакета Apple типа 0x07 (proximity pairing).
-     * Байты данных производителя (без идентификатора компании):
-     * 0 — тип, 1 — длина, 3–4 — модель, 5 — статус,
-     * 6 — заряд наушников (по полубайту), 7 — флаги зарядки (старший полубайт) и заряд кейса (младший).
-     * Заряд 0–10 соответствует 0–100 %, значение 15 означает «нет данных».
-     */
     private fun parse(d: ByteArray) {
-        if (d.size < 8) return
-        lastSeen = System.currentTimeMillis()
-
-        val model = ((d[3].toInt() and 0xFF) shl 8) or (d[4].toInt() and 0xFF)
-        val status = d[5].toInt() and 0xFF
-        val b6 = d[6].toInt() and 0xFF
-        val b7 = d[7].toInt() and 0xFF
-
-        val flip = (status and 0x20) == 0
-        val hi = b6 shr 4
-        val lo = b6 and 0x0F
-        val leftV = if (flip) hi else lo
-        val rightV = if (flip) lo else hi
-        val caseV = b7 and 0x0F
-        val cs = b7 shr 4
-        val chargeL = if (flip) (cs and 2) != 0 else (cs and 1) != 0
-        val chargeR = if (flip) (cs and 1) != 0 else (cs and 2) != 0
-        val chargeC = (cs and 4) != 0
-
-        modelTitle.text = when (model) {
-            0x0220 -> "AirPods"
-            0x0F20 -> "AirPods 2"
-            0x1320 -> "AirPods 3"
-            0x0E20 -> "AirPods Pro"
-            0x1420 -> "AirPods Pro 2"
-            else -> "AirPods"
+        val state = PodsParser.parse(d) ?: return
+        val now = System.currentTimeMillis()
+        lastSeen = now
+        lastDataAt = now
+        lastState = state
+        if (state != savedState) {
+            savedState = state
+            Prefs.saveLast(this, state, now)
         }
+        applyState(state)
         setStatus(R.string.status_connected, true)
-        leftRow.setLevel(percent(leftV), chargeL)
-        rightRow.setLevel(percent(rightV), chargeR)
-        caseRow.setLevel(percent(caseV), chargeC)
     }
 
-    private fun percent(raw: Int): Int? = if (raw in 0..10) raw * 10 else null
+    private fun applyState(state: PodsState) {
+        modelTitle.text = state.model
+        leftRow.setLevel(state.left, state.chargingLeft)
+        rightRow.setLevel(state.right, state.chargingRight)
+        caseRow.setLevel(state.case, state.chargingCase)
+    }
+
+    private fun updatedMessage(): String {
+        val minutes = ((System.currentTimeMillis() - lastDataAt) / 60_000).toInt().coerceAtLeast(0)
+        return when {
+            minutes < 1 -> getString(R.string.updated_now)
+            minutes < 60 -> resources.getQuantityString(R.plurals.updated_minutes, minutes, minutes)
+            minutes < 24 * 60 -> {
+                val hours = minutes / 60
+                resources.getQuantityString(R.plurals.updated_hours, hours, hours)
+            }
+            else -> {
+                val days = minutes / (24 * 60)
+                resources.getQuantityString(R.plurals.updated_days, days, days)
+            }
+        }
+    }
+
+    /** Пока живых данных нет, показываем последние значения приглушёнными и пишем, как давно они получены. */
+    private fun renderUpdated() {
+        if (!::updatedText.isInitialized) return
+        val stale = lastDataAt > 0 && !statusLive
+        updatedText.visibility = if (stale) View.VISIBLE else View.INVISIBLE
+        val alpha = if (stale) 0.55f else 1f
+        leftRow.alpha = alpha
+        rightRow.alpha = alpha
+        caseRow.alpha = alpha
+        if (stale && !switching) updatedText.text = updatedMessage()
+    }
 
     private fun headsetMessage() = headsetPct?.let { getString(R.string.headset_level, it) } ?: ""
 
@@ -376,6 +427,26 @@ class MainActivity : Activity() {
 
     private fun renderDebug() {
         if (!switching) debugLabel.text = debugMessage()
+    }
+
+    private fun developerMessage() = getString(R.string.developed_by) + " " + DEVELOPER
+
+    /** Имя разработчика выделяется цветом и жирным начертанием. */
+    private fun styleDeveloper(text: String): CharSequence {
+        val out = SpannableString(text)
+        val from = text.indexOf(DEVELOPER)
+        if (from >= 0) {
+            val to = from + DEVELOPER.length
+            out.setSpan(ForegroundColorSpan(Palette.INK), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            out.setSpan(StyleSpan(Typeface.BOLD), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        return out
+    }
+
+    private fun openRepo() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(REPO_URL)))
+        } catch (_: Exception) {}
     }
 
     private fun disclaimerMessage(): String {
@@ -403,6 +474,7 @@ class MainActivity : Activity() {
             statusLabel.text = chipMessage()
         }
         (statusDot.background as GradientDrawable).setColor(if (statusLive) Palette.LIVE else Palette.ACCENT)
+        renderUpdated()
     }
 
     private fun tv(
@@ -425,6 +497,7 @@ class MainActivity : Activity() {
 
     private fun pill(text: String, bg: Int, fg: Int, stroke: Int?) =
         tv(text, 14f, fg, "sans-serif-medium").apply {
+            isSingleLine = true
             setPadding(dp(20), dp(13), dp(20), dp(13))
             background = GradientDrawable().apply {
                 cornerRadius = dp(100).toFloat()
@@ -481,8 +554,8 @@ class MainActivity : Activity() {
                 FrameLayout.LayoutParams(dp(8), dp(8), Gravity.CENTER))
         }
         statusDot = View(this).apply { background = oval(Palette.ACCENT) }
-        statusLabel = mono(getString(R.string.chip_searching), 10f, Palette.ON_DARK, true)
-        val statusPill = LinearLayout(this).apply {
+        statusLabel = mono(getString(R.string.chip_searching), 10f, Palette.ON_DARK, true).apply { isSingleLine = true }
+        statusPill = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), dp(10), dp(16), dp(10))
@@ -525,6 +598,8 @@ class MainActivity : Activity() {
         card.addView(modelTitle, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(12) })
         signalText = tv(getString(R.string.status_searching), 13f, Palette.MUTED_DARK)
         card.addView(signalText, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
+        updatedText = mono("", 10f, Palette.MUTED_DARK).apply { visibility = View.INVISIBLE }
+        card.addView(updatedText, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
 
         leftRow = BatteryRow(this, getString(R.string.row_left))
         rightRow = BatteryRow(this, getString(R.string.row_right))
@@ -560,6 +635,23 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); marginStart = dp(8); marginEnd = dp(8) })
         debugLabel = mono(getString(R.string.debug_empty), 10f).apply { visibility = View.GONE; isAllCaps = false }
         col.addView(debugLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14); marginStart = dp(8); marginEnd = dp(8) })
+        developerText = tv(styleDeveloper(developerMessage()), 12f, Palette.MUTED).apply { isSingleLine = true }
+        developerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(16), dp(10))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(100).toFloat()
+                setColor(Palette.BAR)
+                setStroke(dp(1), Palette.LINE)
+            }
+            addView(ImageView(this@MainActivity).apply { setImageResource(R.drawable.ic_github) },
+                LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginEnd = dp(10) })
+            addView(developerText)
+            setOnClickListener { openRepo() }
+        }
+        col.addView(developerRow, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(22); marginStart = dp(8) })
+
         disclaimerText = mono(disclaimerMessage(), 9f)
         col.addView(disclaimerText,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18); marginStart = dp(8); marginEnd = dp(8) })

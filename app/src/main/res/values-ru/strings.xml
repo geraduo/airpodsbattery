@@ -29,4 +29,24 @@
     <string name="debug_empty">Диагностика: —</string>
     <string name="debug_main">Диагностика: пакетов %1$d, Apple %2$d, AirPods(07) %3$d; типы Apple: %4$s</string>
     <string name="debug_headset">HFP-событий: %1$d (последнее: %2$s)</string>
+    <string name="developed_by">Разработано</string>
+    <string name="updated_now">Обновлено только что</string>
+    <plurals name="updated_minutes">
+        <item quantity="one">Обновлено %d минуту назад</item>
+        <item quantity="few">Обновлено %d минуты назад</item>
+        <item quantity="many">Обновлено %d минут назад</item>
+        <item quantity="other">Обновлено %d минуты назад</item>
+    </plurals>
+    <plurals name="updated_hours">
+        <item quantity="one">Обновлено %d час назад</item>
+        <item quantity="few">Обновлено %d часа назад</item>
+        <item quantity="many">Обновлено %d часов назад</item>
+        <item quantity="other">Обновлено %d часа назад</item>
+    </plurals>
+    <plurals name="updated_days">
+        <item quantity="one">Обновлено %d день назад</item>
+        <item quantity="few">Обновлено %d дня назад</item>
+        <item quantity="many">Обновлено %d дней назад</item>
+        <item quantity="other">Обновлено %d дня назад</item>
+    </plurals>
 </resources>
