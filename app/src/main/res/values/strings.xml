@@ -3,7 +3,7 @@
     <string name="app_name">AirPods Battery</string>
 
     <string name="chip_live">LIVE</string>
-    <string name="chip_searching">SEARCHING</string>
+    <string name="chip_searching">SEARCH</string>
 
     <string name="status_searching">Searching for AirPods…</string>
     <string name="status_connected">Connected · data updating</string>

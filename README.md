@@ -29,6 +29,7 @@ Everything runs locally: the app only needs Bluetooth and never uses the interne
 - Charging indicator for each device
 - Model detection (AirPods, AirPods 2, AirPods 3, AirPods Pro, AirPods Pro 2)
 - Overall battery level of connected earbuds, when the system passes it to the app
+- Light and dark themes with a toggle in the top bar, on a soft background of rounded squares
 - Remembers the last known values and shows how long ago they were updated, so the screen is never empty on launch
 - Built-in diagnostics: shows which packets the phone is receiving
 - Two interface languages: English (default) and Russian, switched with the **EN / RU** toggle in the top bar; the choice is remembered

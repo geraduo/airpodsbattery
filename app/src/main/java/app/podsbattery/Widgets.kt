@@ -4,19 +4,19 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.SystemClock
 import android.view.View
 import android.view.animation.DecelerateInterpolator
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 object Palette {
-    val BG = 0xFFFAF9F5.toInt()
+    // Постоянные цвета: тёмная карточка, акценты и всё, что лежит на карточке
     val INK = 0xFF1D1C1A.toInt()
-    val MUTED = 0xFF8A867C.toInt()
-    val LINE = 0xFFE7E4DA.toInt()
-    val BAR = 0xFFFDFCFA.toInt()
     val ON_DARK = 0xFFF5F3EE.toInt()
     val MUTED_DARK = 0xFF8C877D.toInt()
     val LINE_DARK = 0xFF34312D.toInt()
@@ -25,6 +25,62 @@ object Palette {
     val LIVE = 0xFF6CD49A.toInt()
     val RED = 0xFFE5484D.toInt()
     val MATRIX = ACCENT
+
+    // Цвета, которые зависят от темы
+    var dark = false
+        private set
+    var BG = 0
+        private set
+    var TEXT = 0
+        private set
+    var MUTED = 0
+        private set
+    var LINE = 0
+        private set
+    var BAR = 0
+        private set
+    var PILL_BG = 0
+        private set
+    var PILL_TEXT = 0
+        private set
+    var CARD_STROKE = 0
+        private set
+    var PATTERN = 0
+        private set
+    var PATTERN_HI = 0
+        private set
+
+    init {
+        apply(false)
+    }
+
+    fun apply(isDark: Boolean) {
+        dark = isDark
+        if (isDark) {
+            BG = 0xFF0F0E0D.toInt()
+            TEXT = 0xFFF2F0EA.toInt()
+            MUTED = 0xFF8E8A80.toInt()
+            LINE = 0xFF2A2825.toInt()
+            BAR = 0xFF181715.toInt()
+            PILL_BG = 0xFFF2F0EA.toInt()
+            PILL_TEXT = 0xFF1D1C1A.toInt()
+            CARD_STROKE = 0xFF2E2B28.toInt()
+            PATTERN = 0xFF2B2926.toInt()
+            PATTERN_HI = 0xFF050505.toInt()
+        } else {
+            BG = 0xFFFAF9F5.toInt()
+            TEXT = 0xFF1D1C1A.toInt()
+            MUTED = 0xFF8A867C.toInt()
+            LINE = 0xFFE7E4DA.toInt()
+            BAR = 0xFFFDFCFA.toInt()
+            PILL_BG = 0xFF1D1C1A.toInt()
+            PILL_TEXT = 0xFFF5F3EE.toInt()
+            CARD_STROKE = 0x00000000
+            PATTERN = 0xFFDDDACE.toInt()
+            PATTERN_HI = 0xFFFFFFFF.toInt()
+        }
+    }
+
     fun forLevel(p: Int) = if (p <= 20) RED else ACCENT
 }
 
@@ -65,12 +121,17 @@ class BatteryRow(context: Context, title: String) : View(context) {
     private var charging = false
     private var anim: ValueAnimator? = null
 
-    fun setLevel(pct: Int?, isCharging: Boolean) {
+    fun setLevel(pct: Int?, isCharging: Boolean, animate: Boolean = true) {
         val newLevel = pct ?: -1
         if (newLevel == level && isCharging == charging) return
         level = newLevel
         charging = isCharging
         anim?.cancel()
+        if (!animate) {
+            shown = (pct ?: 0).toFloat()
+            invalidate()
+            return
+        }
         anim = ValueAnimator.ofFloat(shown, (pct ?: 0).toFloat()).apply {
             duration = 700
             interpolator = DecelerateInterpolator()
@@ -185,6 +246,96 @@ class MatrixRainView(context: Context) : View(context) {
                 paint.alpha = if (k == 0) 220 else (140 * (1f - k / trail.toFloat())).toInt()
                 val g = glyphs[(c * 31 + k * 17 + (frame / 2) * 7) % glyphs.length]
                 canvas.drawText(g.toString(), startX + c * cell, y, paint)
+            }
+        }
+    }
+}
+
+/** Круглая кнопка смены темы: луна в светлой теме, солнце в тёмной. */
+class ThemeButton(context: Context) : View(context) {
+    private val d = resources.displayMetrics.density
+    private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = d }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rays = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeWidth = 1.6f * d
+    }
+    private val moon = Path()
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        setMeasuredDimension((34 * d).toInt(), (34 * d).toInt())
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val cx = width / 2f
+        val cy = height / 2f
+        fill.color = Palette.BAR
+        canvas.drawCircle(cx, cy, cx - d, fill)
+        ring.color = Palette.LINE
+        canvas.drawCircle(cx, cy, cx - d, ring)
+
+        fill.color = Palette.TEXT
+        rays.color = Palette.TEXT
+        if (Palette.dark) {
+            canvas.drawCircle(cx, cy, 3.8f * d, fill)
+            for (i in 0 until 8) {
+                val angle = Math.toRadians(i * 45.0)
+                val c = cos(angle).toFloat()
+                val s = sin(angle).toFloat()
+                canvas.drawLine(cx + c * 6.4f * d, cy + s * 6.4f * d, cx + c * 8.2f * d, cy + s * 8.2f * d, rays)
+            }
+        } else {
+            val full = Path().apply { addCircle(cx, cy, 7f * d, Path.Direction.CW) }
+            val cut = Path().apply { addCircle(cx + 3.6f * d, cy - 2.8f * d, 6f * d, Path.Direction.CW) }
+            moon.reset()
+            moon.op(full, cut, Path.Op.DIFFERENCE)
+            canvas.drawPath(moon, fill)
+        }
+    }
+}
+
+/** Фон из скруглённых квадратиков, как на сайте: бледные контуры с мягким бликом. */
+class PatternView(context: Context) : View(context) {
+    private val d = resources.displayMetrics.density
+    private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * d
+    }
+    private val rect = RectF()
+
+    private fun rnd(c: Int, r: Int, salt: Int): Float {
+        var x = c * 73856093 xor r * 19349663 xor salt * 83492791
+        x = x xor (x ushr 13)
+        x *= 1274126177
+        x = x xor (x ushr 16)
+        return (x and 0xFFFF) / 65535f
+    }
+
+    private fun withAlpha(color: Int, factor: Float): Int =
+        (color and 0x00FFFFFF) or (((color ushr 24) * factor).toInt() shl 24)
+
+    override fun onDraw(canvas: Canvas) {
+        val pitch = 84f * d
+        val cols = (width / pitch).toInt() + 2
+        val rows = (height / pitch).toInt() + 2
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                if (rnd(c, r, 1) < 0.3f) continue
+                val size = (44f + 20f * rnd(c, r, 2)) * d
+                val shift = if (r % 2 == 0) 0f else pitch / 2f
+                val cx = c * pitch + shift + (rnd(c, r, 3) - 0.5f) * 18f * d
+                val cy = r * pitch + (rnd(c, r, 4) - 0.5f) * 18f * d
+                val strength = 0.35f + 0.55f * rnd(c, r, 5)
+                val radius = size * 0.28f
+                rect.set(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f)
+
+                rect.offset(-1.5f * d, -1.5f * d)
+                outline.color = withAlpha(Palette.PATTERN_HI, strength)
+                canvas.drawRoundRect(rect, radius, radius, outline)
+                rect.offset(1.5f * d, 1.5f * d)
+                outline.color = withAlpha(Palette.PATTERN, strength)
+                canvas.drawRoundRect(rect, radius, radius, outline)
             }
         }
     }

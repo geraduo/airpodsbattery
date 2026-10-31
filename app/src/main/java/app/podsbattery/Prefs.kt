@@ -4,17 +4,21 @@ import android.content.Context
 import android.content.res.Configuration
 import java.util.Locale
 
-/** Настройки приложения: язык интерфейса. */
+/** Настройки приложения: язык, тема и последние показания. */
 object Prefs {
     const val DEFAULT_LANG = "en"
     private const val FILE = "settings"
     private const val KEY_LANG = "lang"
     private const val KEY_LAST = "last"
+    private const val KEY_DARK = "dark"
 
     private fun prefs(c: Context) = c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     fun lang(c: Context): String = prefs(c).getString(KEY_LANG, DEFAULT_LANG) ?: DEFAULT_LANG
     fun setLang(c: Context, code: String) = prefs(c).edit().putString(KEY_LANG, code).apply()
+
+    fun dark(c: Context): Boolean = prefs(c).getBoolean(KEY_DARK, false)
+    fun setDark(c: Context, on: Boolean) = prefs(c).edit().putBoolean(KEY_DARK, on).apply()
 
     /** Запоминает последние показания AirPods и время, когда они были получены. */
     fun saveLast(c: Context, s: PodsState, time: Long) {

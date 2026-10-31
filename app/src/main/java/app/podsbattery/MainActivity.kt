@@ -16,6 +16,7 @@ import android.content.res.Resources
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.location.LocationManager
 import android.net.Uri
@@ -31,6 +32,7 @@ import android.text.style.StyleSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsetsController
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -60,6 +62,9 @@ class MainActivity : Activity() {
     private lateinit var developerText: TextView
     private lateinit var updatedText: TextView
     private lateinit var statusPill: LinearLayout
+    private lateinit var host: FrameLayout
+    private var themeSwitching = false
+    private var debugVisible = false
     private lateinit var developerRow: LinearLayout
     private lateinit var rain: MatrixRainView
     private val langButtons = mutableMapOf<String, TextView>()
@@ -167,7 +172,7 @@ class MainActivity : Activity() {
     }
 
     private fun setLanguage(code: String) {
-        if (code == lang || switching) return
+        if (code == lang || switching || themeSwitching) return
         lang = code
         Prefs.setLang(this, code)
         applyLocale(code)
@@ -181,8 +186,8 @@ class MainActivity : Activity() {
     private fun updateLanguageToggle() {
         for ((code, button) in langButtons) {
             val active = code == lang
-            button.setTextColor(if (active) Palette.ON_DARK else Palette.MUTED)
-            (button.background as GradientDrawable).setColor(if (active) Palette.INK else Color.TRANSPARENT)
+            button.setTextColor(if (active) Palette.PILL_TEXT else Palette.MUTED)
+            (button.background as GradientDrawable).setColor(if (active) Palette.PILL_BG else Color.TRANSPARENT)
         }
     }
 
@@ -283,7 +288,11 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         lang = Prefs.lang(this)
         applyLocale(lang)
-        buildUi()
+        Palette.apply(Prefs.dark(this))
+        host = FrameLayout(this)
+        setContentView(host)
+        applySystemBars()
+        host.addView(buildUi())
         Prefs.loadLast(this)?.let { (state, time) ->
             lastState = state
             savedState = state
@@ -291,6 +300,55 @@ class MainActivity : Activity() {
             applyState(state)
         }
         setStatus(R.string.status_searching)
+    }
+
+    /** Цвета и значки строки состояния и панели навигации подстраиваются под тему. */
+    private fun applySystemBars() {
+        window.setBackgroundDrawable(ColorDrawable(Palette.BG))
+        window.statusBarColor = Palette.BG
+        window.navigationBarColor = Palette.BG
+        if (Build.VERSION.SDK_INT >= 30) {
+            val flags = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            window.insetsController?.setSystemBarsAppearance(if (Palette.dark) 0 else flags, flags)
+        } else {
+            val light = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            val current = window.decorView.systemUiVisibility
+            window.decorView.systemUiVisibility = if (Palette.dark) current and light.inv() else current or light
+        }
+    }
+
+    private fun toggleTheme() {
+        if (switching || themeSwitching) return
+        themeSwitching = true
+        val dark = !Palette.dark
+        Prefs.setDark(this, dark)
+        Palette.apply(dark)
+        rebuildUi()
+    }
+
+    /** Интерфейс собирается заново с новыми цветами и плавно проявляется поверх старого. */
+    private fun rebuildUi() {
+        val old = host.getChildAt(0)
+        val fresh = buildUi()
+        restoreUi()
+        fresh.alpha = 0f
+        host.addView(fresh)
+        applySystemBars()
+        runTimed(0, 280, { f -> fresh.alpha = f }, {
+            host.removeView(old)
+            themeSwitching = false
+        })
+    }
+
+    private fun restoreUi() {
+        lastState?.let { applyState(it, animate = false) }
+        if (headsetPct != null) {
+            headsetText.visibility = View.VISIBLE
+            headsetText.text = headsetMessage()
+        }
+        renderStatus()
+        renderDebug()
     }
 
     override fun onResume() {
@@ -375,11 +433,11 @@ class MainActivity : Activity() {
         setStatus(R.string.status_connected, true)
     }
 
-    private fun applyState(state: PodsState) {
+    private fun applyState(state: PodsState, animate: Boolean = true) {
         modelTitle.text = state.model
-        leftRow.setLevel(state.left, state.chargingLeft)
-        rightRow.setLevel(state.right, state.chargingRight)
-        caseRow.setLevel(state.case, state.chargingCase)
+        leftRow.setLevel(state.left, state.chargingLeft, animate)
+        rightRow.setLevel(state.right, state.chargingRight, animate)
+        caseRow.setLevel(state.case, state.chargingCase, animate)
     }
 
     private fun updatedMessage(): String {
@@ -437,7 +495,7 @@ class MainActivity : Activity() {
         val from = text.indexOf(DEVELOPER)
         if (from >= 0) {
             val to = from + DEVELOPER.length
-            out.setSpan(ForegroundColorSpan(Palette.INK), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            out.setSpan(ForegroundColorSpan(Palette.TEXT), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             out.setSpan(StyleSpan(Typeface.BOLD), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
         return out
@@ -517,11 +575,11 @@ class MainActivity : Activity() {
         }
         for ((code, label) in listOf("en" to "EN", "ru" to "RU")) {
             val active = code == lang
-            val button = mono(label, 10f, if (active) Palette.ON_DARK else Palette.MUTED, true).apply {
+            val button = mono(label, 10f, if (active) Palette.PILL_TEXT else Palette.MUTED, true).apply {
                 setPadding(dp(9), dp(6), dp(9), dp(6))
                 background = GradientDrawable().apply {
                     cornerRadius = dp(100).toFloat()
-                    setColor(if (active) Palette.INK else Color.TRANSPARENT)
+                    setColor(if (active) Palette.PILL_BG else Color.TRANSPARENT)
                 }
                 setOnClickListener { setLanguage(code) }
             }
@@ -532,8 +590,9 @@ class MainActivity : Activity() {
 
     private fun darkLine() = View(this).apply { setBackgroundColor(Palette.LINE_DARK) }
 
-    private fun buildUi() {
+    private fun buildUi(): View {
         val root = FrameLayout(this).apply { setBackgroundColor(Palette.BG) }
+        root.addView(PatternView(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             overScrollMode = View.OVER_SCROLL_NEVER
@@ -548,20 +607,20 @@ class MainActivity : Activity() {
             background = GradientDrawable().apply {
                 cornerRadius = dp(9).toFloat()
                 setColor(Color.TRANSPARENT)
-                setStroke(dp(1), Palette.INK)
+                setStroke(dp(1), Palette.TEXT)
             }
             addView(View(this@MainActivity).apply { background = oval(Palette.ACCENT) },
                 FrameLayout.LayoutParams(dp(8), dp(8), Gravity.CENTER))
         }
         statusDot = View(this).apply { background = oval(Palette.ACCENT) }
-        statusLabel = mono(getString(R.string.chip_searching), 10f, Palette.ON_DARK, true).apply { isSingleLine = true }
+        statusLabel = mono(getString(R.string.chip_searching), 10f, Palette.PILL_TEXT, true).apply { isSingleLine = true }
         statusPill = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), dp(10), dp(16), dp(10))
             background = GradientDrawable().apply {
                 cornerRadius = dp(100).toFloat()
-                setColor(Palette.INK)
+                setColor(Palette.PILL_BG)
             }
             addView(statusDot, LinearLayout.LayoutParams(dp(7), dp(7)).apply { marginEnd = dp(8) })
             addView(statusLabel)
@@ -576,9 +635,11 @@ class MainActivity : Activity() {
                 setStroke(dp(1), Palette.LINE)
             }
             addView(logo, LinearLayout.LayoutParams(dp(30), dp(30)))
-            addView(mono("AirPods", 12f, Palette.INK, true),
+            addView(mono("AirPods", 12f, Palette.TEXT, true).apply { isSingleLine = true },
                 LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
             addView(languageToggle(), LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+            addView(ThemeButton(this@MainActivity).apply { setOnClickListener { toggleTheme() } },
+                LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
             addView(statusPill)
         }
         col.addView(topBar, LinearLayout.LayoutParams(-1, -2))
@@ -590,7 +651,10 @@ class MainActivity : Activity() {
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 intArrayOf(0xFF3B2B23.toInt(), 0xFF1F1D1B.toInt(), Palette.INK)
-            ).apply { cornerRadius = dp(36).toFloat() }
+            ).apply {
+                cornerRadius = dp(36).toFloat()
+                setStroke(dp(1), Palette.CARD_STROKE)
+            }
         }
         cardTitle = mono(getString(R.string.card_title), 10f, Palette.MUTED_DARK)
         card.addView(cardTitle)
@@ -613,12 +677,13 @@ class MainActivity : Activity() {
         headsetText = mono("", 10f, Palette.MUTED_DARK).apply { visibility = View.GONE; isAllCaps = false }
         card.addView(headsetText, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(18) })
 
-        refreshButton = pill(getString(R.string.btn_refresh), Palette.BG, Palette.INK, Palette.ON_DARK).apply {
+        refreshButton = pill(getString(R.string.btn_refresh), Palette.ON_DARK, Palette.INK, Palette.ON_DARK).apply {
             setOnClickListener { stopScan(); startScan() }
         }
         diagButton = pill(getString(R.string.btn_diagnostics), Color.TRANSPARENT, Palette.ON_DARK, Palette.LINE_DARK).apply {
             setOnClickListener {
-                debugLabel.visibility = if (debugLabel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                debugVisible = !debugVisible
+                debugLabel.visibility = if (debugVisible) View.VISIBLE else View.GONE
             }
         }
         val buttons = LinearLayout(this).apply {
@@ -633,7 +698,7 @@ class MainActivity : Activity() {
         hintText = mono(getString(R.string.hint_case), 10f)
         col.addView(hintText,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); marginStart = dp(8); marginEnd = dp(8) })
-        debugLabel = mono(getString(R.string.debug_empty), 10f).apply { visibility = View.GONE; isAllCaps = false }
+        debugLabel = mono(getString(R.string.debug_empty), 10f).apply { visibility = if (debugVisible) View.VISIBLE else View.GONE; isAllCaps = false }
         col.addView(debugLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14); marginStart = dp(8); marginEnd = dp(8) })
         developerText = tv(styleDeveloper(developerMessage()), 12f, Palette.MUTED).apply { isSingleLine = true }
         developerRow = LinearLayout(this).apply {
@@ -665,6 +730,6 @@ class MainActivity : Activity() {
         root.addView(scroll)
         rain = MatrixRainView(this)
         root.addView(rain, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        setContentView(root)
+        return root
     }
 }
