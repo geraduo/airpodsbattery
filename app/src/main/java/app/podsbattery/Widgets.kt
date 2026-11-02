@@ -319,7 +319,6 @@ class PatternView(context: Context) : View(context) {
         for (i in it.indices) it[i] = rnd.nextFloat() * 2f * Math.PI.toFloat()
     }
     private val startMs = SystemClock.uptimeMillis()
-    private var lastDraw = 0L
 
     private var touching = false
     private var targetX = 0f
@@ -355,11 +354,7 @@ class PatternView(context: Context) : View(context) {
             fingerY += (targetY - fingerY) * 0.25f
             strength += ((if (touching) 1f else 0f) - strength) * 0.16f
             if (!touching && strength <= 0.01f) strength = 0f
-            val now = SystemClock.uptimeMillis()
-            if (strength > 0f || now - lastDraw >= 32L) {
-                lastDraw = now
-                invalidate()
-            }
+            invalidate()
             postOnAnimation(this)
         }
     }
@@ -451,7 +446,7 @@ class PatternView(context: Context) : View(context) {
         val pitch = 76f * d
         val margin = 90f * d
         val reach = 160f * d
-        val t = (SystemClock.uptimeMillis() - startMs) / 1000.0
+        val t = (drawingTime - startMs) / 1000.0
         val swayPhase = 2.0 * Math.PI * t / SWAY_PERIOD
         val swayX = (0.14 * pitch * sin(swayPhase - 0.61)).toFloat()
         val swayY = (0.15 * pitch * sin(swayPhase + 1.5)).toFloat()
@@ -614,6 +609,13 @@ class SparkView(context: Context) : View(context) {
         canvas.restore()
     }
 
+    private fun drawFrame(canvas: Canvas, bmp: Bitmap, frame: Int) {
+        val size = bmp.width
+        src.set(0, frame * size, size, (frame + 1) * size)
+        dst.set(0, 0, width, height)
+        canvas.drawBitmap(bmp, src, dst, bitmapPaint)
+    }
+
     private fun drawStrip(canvas: Canvas) {
         var local = shownFrame
         var k = 0
@@ -621,12 +623,21 @@ class SparkView(context: Context) : View(context) {
             local -= frameCounts[k]
             k++
         }
-        val bmp = strips[k]
-        val size = bmp.width
-        src.set(0, local * size, size, (local + 1) * size)
-        dst.set(0, 0, width, height)
-        canvas.drawBitmap(bmp, src, dst, bitmapPaint)
+        var mix = 1f
+        if (strips.size > 1 && local < FADE_FRAMES) {
+            val u = (local + 1f) / (FADE_FRAMES + 1f)
+            mix = u * u * (3f - 2f * u)
+        }
+        if (mix < 1f) {
+            val prev = (k + strips.size - 1) % strips.size
+            bitmapPaint.alpha = ((1f - mix) * 255f).roundToInt()
+            drawFrame(canvas, strips[prev], local % frameCounts[prev])
+        }
+        bitmapPaint.alpha = (mix * 255f).roundToInt()
+        drawFrame(canvas, strips[k], local)
+        bitmapPaint.alpha = 255
     }
 }
 
+private const val FADE_FRAMES = 10
 private const val STRIP_FPS = 30L
