@@ -2,9 +2,12 @@ package app.podsbattery
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.SystemClock
@@ -17,7 +20,6 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 object Palette {
-    // Постоянные цвета: тёмная карточка, акценты и всё, что лежит на карточке
     val INK = 0xFF1D1C1A.toInt()
     val ON_DARK = 0xFFF5F3EE.toInt()
     val MUTED_DARK = 0xFF8C877D.toInt()
@@ -28,7 +30,6 @@ object Palette {
     val RED = 0xFFE5484D.toInt()
     val MATRIX = ACCENT
 
-    // Цвета, которые зависят от темы
     var dark = false
         private set
     var BG = 0
@@ -86,7 +87,6 @@ object Palette {
     fun forLevel(p: Int) = if (p <= 20) RED else ACCENT
 }
 
-/** Строка заряда на тёмной карточке: число, подпись и 10 сегментов (как «пиксели» на сайте). */
 class BatteryRow(context: Context, title: String) : View(context) {
     private val d = resources.displayMetrics.density
     var title: String = title
@@ -97,22 +97,26 @@ class BatteryRow(context: Context, title: String) : View(context) {
         typeface = Typeface.create("sans-serif", Typeface.BOLD)
         letterSpacing = -0.03f
         color = Palette.ON_DARK
+        textSize = 32 * d
     }
     private val pctPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         color = Palette.MUTED_DARK
+        textSize = 15 * d
     }
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.create("monospace", Typeface.NORMAL)
         color = Palette.MUTED_DARK
         letterSpacing = 0.14f
         textAlign = Paint.Align.RIGHT
+        textSize = 10 * d
     }
     private val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.create("monospace", Typeface.NORMAL)
         color = Palette.LIVE
         letterSpacing = 0.14f
         textAlign = Paint.Align.RIGHT
+        textSize = 10 * d
     }
     private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.TRACK_DARK }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -151,22 +155,18 @@ class BatteryRow(context: Context, title: String) : View(context) {
         val x0 = paddingLeft.toFloat()
         val x1 = (width - paddingRight).toFloat()
 
-        numPaint.textSize = 32 * d
         if (level >= 0) {
             val num = shown.roundToInt().toString()
             numPaint.color = Palette.ON_DARK
             canvas.drawText(num, x0, 32 * d, numPaint)
-            pctPaint.textSize = 15 * d
             canvas.drawText("%", x0 + numPaint.measureText(num) + 3 * d, 32 * d, pctPaint)
         } else {
             numPaint.color = Palette.MUTED_DARK
             canvas.drawText("—", x0, 32 * d, numPaint)
         }
 
-        labelPaint.textSize = 10 * d
         canvas.drawText(title, x1, 14 * d, labelPaint)
         if (charging) {
-            subPaint.textSize = 10 * d
             canvas.drawText(chargingText, x1, 30 * d, subPaint)
         }
 
@@ -189,10 +189,6 @@ class BatteryRow(context: Context, title: String) : View(context) {
     }
 }
 
-/**
- * Полоса «матричного дождя»: проходит по экрану один раз, сверху вниз.
- * Работает на собственном таймере, поэтому не зависит от системной настройки «Масштаб анимации».
- */
 class MatrixRainView(context: Context) : View(context) {
     private val d = resources.displayMetrics.density
     private val glyphs = "01ABCDEFGHJKLMNPQRSTUVWXYZ\$#@%&*+=<>/"
@@ -200,7 +196,9 @@ class MatrixRainView(context: Context) : View(context) {
         typeface = Typeface.create("monospace", Typeface.BOLD)
         textAlign = Paint.Align.CENTER
         color = Palette.MATRIX
+        textSize = 13 * d
     }
+    private val glyphStrings = Array(glyphs.length) { glyphs[it].toString() }
     private val rnd = java.util.Random(7)
     private val shifts = FloatArray(64) { rnd.nextFloat() }
     private val trails = IntArray(64) { 5 + rnd.nextInt(7) }
@@ -234,26 +232,27 @@ class MatrixRainView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         if (progress < 0f) return
         val cell = 15 * d
-        paint.textSize = 13 * d
         val cols = minOf((width / cell).toInt(), shifts.size)
         val startX = (width - cols * cell) / 2f + cell / 2f
         val travel = height + 14 * cell
         for (c in 0 until cols) {
-            // небольшой разброс по высоте делает фронт дождя неровным
             val head = progress * travel - shifts[c] * 4 * cell
             val trail = trails[c]
             for (k in 0 until trail) {
                 val y = head - k * cell
                 if (y < 0f || y > height + cell) continue
                 paint.alpha = if (k == 0) 220 else (140 * (1f - k / trail.toFloat())).toInt()
-                val g = glyphs[(c * 31 + k * 17 + (frame / 2) * 7) % glyphs.length]
-                canvas.drawText(g.toString(), startX + c * cell, y, paint)
+                val g = glyphStrings[(c * 31 + k * 17 + (frame / 2) * 7) % glyphStrings.size]
+                canvas.drawText(g, startX + c * cell, y, paint)
             }
         }
     }
 }
 
-/** Круглая кнопка смены темы: луна в светлой теме, солнце в тёмной. */
+private const val CELL_OFF: Byte = 0
+private const val CELL_OK: Byte = 1
+private const val CELL_REST_FAILED: Byte = 2
+
 class ThemeButton(context: Context) : View(context) {
     private val d = resources.displayMetrics.density
     private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = d }
@@ -297,11 +296,6 @@ class ThemeButton(context: Context) : View(context) {
     }
 }
 
-/**
- * Фон из скруглённых квадратиков в 2.5D: плоскость с сеткой наклонена в перспективе,
- * левый край ближе (крупнее), правый дальше (мельче и бледнее).
- * Возле пальца квадратики приподнимаются к зрителю и слегка поворачиваются, потом плавно возвращаются.
- */
 class PatternView(context: Context) : View(context) {
     private val d = resources.displayMetrics.density
     private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -310,10 +304,8 @@ class PatternView(context: Context) : View(context) {
     }
     private val path = Path()
 
-    // Контур скруглённого квадрата в локальных координатах: по шесть точек на каждый угол
     private val local: FloatArray
 
-    // Наклон плоскости и «камера»
     private val cosY = cos(Math.toRadians(32.0)).toFloat()
     private val sinY = sin(Math.toRadians(32.0)).toFloat()
     private val cosX = cos(Math.toRadians(10.0)).toFloat()
@@ -323,6 +315,17 @@ class PatternView(context: Context) : View(context) {
     private var centerY = 0f
     private val mid = FloatArray(3)
     private val pt = FloatArray(3)
+
+    private val rowsN = 19
+    private val colsN = 13
+    private val cellCount = rowsN * colsN
+    private val restPaths = Array(cellCount) { Path() }
+    private val restState = ByteArray(cellCount)
+    private val restScale = FloatArray(cellCount)
+    private val restMidX = FloatArray(cellCount)
+    private val restMidY = FloatArray(cellCount)
+    private var builtW = -1
+    private var builtH = -1
 
     private var touching = false
     private var targetX = 0f
@@ -367,7 +370,6 @@ class PatternView(context: Context) : View(context) {
         }
     }
 
-    /** Принимает координаты касания в системе этого элемента; сами события при этом не перехватываются. */
     fun touch(x: Float, y: Float, action: Int) {
         when (action) {
             MotionEvent.ACTION_DOWN -> {
@@ -395,7 +397,6 @@ class PatternView(context: Context) : View(context) {
         super.onDetachedFromWindow()
     }
 
-    /** Точка плоскости (x, y) с подъёмом z: поворот вокруг Y и X, затем перспектива. out = [экранный x, экранный y, масштаб]. */
     private fun project(x: Float, y: Float, z: Float, out: FloatArray): Boolean {
         val x1 = x * cosY + z * sinY
         val z1 = -x * sinY + z * cosY
@@ -413,75 +414,95 @@ class PatternView(context: Context) : View(context) {
     private fun withAlpha(color: Int, factor: Float): Int =
         (color and 0x00FFFFFF) or (((color ushr 24) * factor).toInt() shl 24)
 
+    private fun buildPath(wx: Float, wy: Float, lift: Float, ca: Float, sa: Float, out: Path): Boolean {
+        out.reset()
+        var i = 0
+        while (i < local.size) {
+            val lx = local[i]
+            val ly = local[i + 1]
+            val px = wx + lx * ca - ly * sa
+            val py = wy + lx * sa + ly * ca
+            if (!project(px, py, lift, pt)) return false
+            if (i == 0) out.moveTo(pt[0], pt[1]) else out.lineTo(pt[0], pt[1])
+            i += 2
+        }
+        out.close()
+        return true
+    }
+
+    private fun buildRest() {
+        builtW = width
+        builtH = height
+        val pitch = 76f * d
+        val margin = 90f * d
+        for (r in -9..9) {
+            for (c in -6..6) {
+                val idx = (r + 9) * colsN + (c + 6)
+                val wx = c * pitch
+                val wy = r * pitch
+                if (!project(wx, wy, 0f, mid) ||
+                    mid[0] < -margin || mid[0] > width + margin || mid[1] < -margin || mid[1] > height + margin
+                ) {
+                    restState[idx] = CELL_OFF
+                    continue
+                }
+                restMidX[idx] = mid[0]
+                restMidY[idx] = mid[1]
+                restScale[idx] = mid[2]
+                restState[idx] = if (buildPath(wx, wy, 0f, 1f, 0f, restPaths[idx])) CELL_OK else CELL_REST_FAILED
+            }
+        }
+    }
+
     override fun onDraw(canvas: Canvas) {
         centerX = width / 2f
         centerY = height / 2f
+        if (width != builtW || height != builtH) buildRest()
         val pitch = 76f * d
         val reach = 160f * d
-        val margin = 90f * d
 
-        for (r in -9..9) {
-            for (c in -6..6) {
-                val wx = c * pitch
-                val wy = r * pitch
-                if (!project(wx, wy, 0f, mid)) continue
-                if (mid[0] < -margin || mid[0] > width + margin || mid[1] < -margin || mid[1] > height + margin) continue
+        for (idx in 0 until cellCount) {
+            val state = restState[idx]
+            if (state == CELL_OFF) continue
 
-                var angle = 0f
-                var lift = 0f
-                if (strength > 0f) {
-                    val dx = mid[0] - fingerX
-                    val dy = mid[1] - fingerY
-                    val dist = sqrt(dx * dx + dy * dy)
-                    if (dist < reach) {
-                        val k = 1f - dist / reach
-                        angle = 20f * k * k * strength
-                        lift = 44f * d * k * k * strength
-                    }
+            var cellPath = restPaths[idx]
+            var moved = false
+            if (strength > 0f) {
+                val dx = restMidX[idx] - fingerX
+                val dy = restMidY[idx] - fingerY
+                val dist = sqrt(dx * dx + dy * dy)
+                if (dist < reach) {
+                    val k = 1f - dist / reach
+                    val angle = 20f * k * k * strength
+                    val lift = 44f * d * k * k * strength
+                    val rad = Math.toRadians(angle.toDouble())
+                    val ca = cos(rad).toFloat()
+                    val sa = sin(rad).toFloat()
+                    val r = idx / colsN - 9
+                    val c = idx % colsN - 6
+                    if (!buildPath(c * pitch, r * pitch, lift, ca, sa, path)) continue
+                    cellPath = path
+                    moved = true
                 }
-                val rad = Math.toRadians(angle.toDouble())
-                val ca = cos(rad).toFloat()
-                val sa = sin(rad).toFloat()
-
-                path.reset()
-                var ok = true
-                var i = 0
-                while (i < local.size) {
-                    val lx = local[i]
-                    val ly = local[i + 1]
-                    val px = wx + lx * ca - ly * sa
-                    val py = wy + lx * sa + ly * ca
-                    if (!project(px, py, lift, pt)) {
-                        ok = false
-                        break
-                    }
-                    if (i == 0) path.moveTo(pt[0], pt[1]) else path.lineTo(pt[0], pt[1])
-                    i += 2
-                }
-                if (!ok) continue
-                path.close()
-
-                val scale = mid[2]
-                val fade = ((scale - 0.55f) / 0.6f).coerceIn(0.35f, 1f)
-                outline.strokeWidth = 2f * d * scale
-
-                canvas.save()
-                canvas.translate(-1.5f * d * scale, -1.5f * d * scale)
-                outline.color = withAlpha(Palette.PATTERN_HI, fade)
-                canvas.drawPath(path, outline)
-                canvas.restore()
-
-                outline.color = withAlpha(Palette.PATTERN, fade)
-                canvas.drawPath(path, outline)
             }
+            if (!moved && state != CELL_OK) continue
+
+            val scale = restScale[idx]
+            val fade = ((scale - 0.55f) / 0.6f).coerceIn(0.35f, 1f)
+            outline.strokeWidth = 2f * d * scale
+
+            canvas.save()
+            canvas.translate(-1.5f * d * scale, -1.5f * d * scale)
+            outline.color = withAlpha(Palette.PATTERN_HI, fade)
+            canvas.drawPath(cellPath, outline)
+            canvas.restore()
+
+            outline.color = withAlpha(Palette.PATTERN, fade)
+            canvas.drawPath(cellPath, outline)
         }
     }
 }
 
-/**
- * Анимированный значок-«искра»: лучи пульсируют и медленно вращаются, как индикатор размышления.
- * Пока идёт поиск, он оживлённее, при живых данных успокаивается.
- */
 class SparkView(context: Context) : View(context) {
     private val d = resources.displayMetrics.density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -493,29 +514,74 @@ class SparkView(context: Context) : View(context) {
     private var phase = 0f
     private var angle = 0f
     private var last = 0L
+    private var running = false
+
+    private val strip: Bitmap? = run {
+        try {
+            BitmapFactory.decodeResource(resources, R.drawable.spark_strip, BitmapFactory.Options().apply { inScaled = false })
+        } catch (e: Exception) {
+            null
+        }
+    }
+    private val frameSize = strip?.width ?: 0
+    private val frames = if (strip != null && frameSize > 0) maxOf(1, strip.height / frameSize) else 1
+    private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+    private val src = Rect()
+    private val dst = Rect()
+    private var stripMs = 0L
+    private var shownFrame = 0
 
     private val ticker = object : Runnable {
         override fun run() {
+            if (!running) return
             val now = SystemClock.uptimeMillis()
             val dt = if (last == 0L) 16L else minOf(now - last, 64L)
             last = now
-            val speed = if (busy) 1f else 0.35f
-            phase += dt / 1000f * speed * (2f * Math.PI.toFloat() / 1.6f)
-            angle += dt / 1000f * speed * 40f
-            invalidate()
+            if (strip != null) {
+                stripMs += dt
+                val frame = ((stripMs * STRIP_FPS / 1000) % frames).toInt()
+                if (frame != shownFrame) {
+                    shownFrame = frame
+                    invalidate()
+                }
+            } else {
+                phase = (phase + dt / 1000f * (2f * Math.PI.toFloat() / 1.6f)) % (2f * Math.PI.toFloat())
+                angle = (angle + dt / 1000f * 40f) % 360f
+                invalidate()
+            }
             postOnAnimation(this)
         }
     }
 
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
+    private fun startTicking() {
+        if (running) return
+        running = true
         last = 0L
         postOnAnimation(ticker)
     }
 
-    override fun onDetachedFromWindow() {
+    private fun stopTicking() {
+        running = false
         removeCallbacks(ticker)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        startTicking()
+    }
+
+    override fun onDetachedFromWindow() {
+        stopTicking()
         super.onDetachedFromWindow()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == VISIBLE) {
+            if (isAttachedToWindow) startTicking()
+        } else {
+            stopTicking()
+        }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -523,6 +589,10 @@ class SparkView(context: Context) : View(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
+        if (strip != null) {
+            drawStrip(canvas, strip)
+            return
+        }
         val cx = width / 2f
         val cy = height / 2f
         val radius = minOf(width, height) / 2f - d
@@ -542,4 +612,12 @@ class SparkView(context: Context) : View(context) {
         }
         canvas.restore()
     }
+
+    private fun drawStrip(canvas: Canvas, bmp: Bitmap) {
+        src.set(0, shownFrame * frameSize, frameSize, (shownFrame + 1) * frameSize)
+        dst.set(0, 0, width, height)
+        canvas.drawBitmap(bmp, src, dst, bitmapPaint)
+    }
 }
+
+private const val STRIP_FPS = 30L

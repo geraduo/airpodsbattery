@@ -29,6 +29,7 @@ import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
+import android.view.Choreographer
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -86,6 +87,13 @@ class MainActivity : Activity() {
     private var lastDataAt = 0L
 
     private val handler = Handler(Looper.getMainLooper())
+    private val touchLoc = IntArray(2)
+    private var shownDotColor = 0
+    private var debugPending = false
+    private val debugRunnable = Runnable {
+        debugPending = false
+        renderDebugNow()
+    }
     private var lastSeen = 0L
     private var scanning = false
 
@@ -107,7 +115,6 @@ class MainActivity : Activity() {
                     types[t] = (types[t] ?: 0) + 1
                     if (data[0] == 0x07.toByte()) {
                         pairing++
-                        // Берём только близкие устройства (ваши AirPods, а не чужие рядом)
                         if (result.rssi >= -85) parse(data)
                     }
                 }
@@ -134,7 +141,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // Общий заряд от подключённых AirPods приходит как команда гарнитуры Apple +IPHONEACCEV
     private val headsetReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             val cmd = i.getStringExtra(BluetoothHeadset.EXTRA_VENDOR_SPECIFIC_HEADSET_EVENT_CMD) ?: return
@@ -165,7 +171,6 @@ class MainActivity : Activity() {
         } catch (_: Exception) {}
     }
 
-    // Ресурсы подменяются без пересоздания экрана, поэтому язык меняется без вспышки
     override fun getResources(): Resources = localizedRes ?: super.getResources()
 
     private fun applyLocale(code: String) {
@@ -196,20 +201,19 @@ class MainActivity : Activity() {
 
     private val scrambleGlyphs = "01ABCDEFGHJKLMNPQRSTUVWXYZ\$#@%&*+=<>/"
 
-    /** Покадровый таймер на SystemClock: не зависит от системной настройки «Масштаб анимации». */
     private fun runTimed(delay: Long, duration: Long, onFrame: (Float) -> Unit, onEnd: () -> Unit) {
         val begin = SystemClock.uptimeMillis() + delay
-        val tick = object : Runnable {
-            override fun run() {
+        val choreographer = Choreographer.getInstance()
+        val tick = object : Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
                 val f = ((SystemClock.uptimeMillis() - begin).toFloat() / duration).coerceIn(0f, 1f)
                 onFrame(f)
-                if (f >= 1f) onEnd() else handler.postDelayed(this, 16)
+                if (f >= 1f) onEnd() else choreographer.postFrameCallback(this)
             }
         }
-        handler.postDelayed(tick, delay)
+        handler.postDelayed({ tick.doFrame(0L) }, delay)
     }
 
-    /** Текст «расшифровывается» слева направо из случайных символов; до своей очереди остаётся прежним. */
     private fun scramble(
         delay: Long, duration: Long, target: () -> String, tile: View?, onText: (CharSequence) -> Unit
     ) {
@@ -220,7 +224,6 @@ class MainActivity : Activity() {
         runTimed(delay, duration, { f ->
             val text = target()
             if (tile != null && !started) {
-                // Узнаём будущую ширину плитки по итоговому тексту, чтобы растянуть её плавно, а не рывком
                 started = true
                 fromWidth = tile.width
                 onText(text)
@@ -252,7 +255,6 @@ class MainActivity : Activity() {
         })
     }
 
-    /** Смена языка: «матричный» дождь и расшифровка текстов сверху вниз. */
     private fun playLanguageTransition() {
         switching = true
         var index = 0
@@ -282,7 +284,7 @@ class MainActivity : Activity() {
         handler.postDelayed({
             switching = false
             renderStatus()
-            renderDebug()
+            renderDebugNow()
             renderUpdated()
         }, total + 50)
     }
@@ -307,14 +309,12 @@ class MainActivity : Activity() {
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (::pattern.isInitialized) {
-            val loc = IntArray(2)
-            pattern.getLocationOnScreen(loc)
-            pattern.touch(ev.rawX - loc[0], ev.rawY - loc[1], ev.actionMasked)
+            pattern.getLocationOnScreen(touchLoc)
+            pattern.touch(ev.rawX - touchLoc[0], ev.rawY - touchLoc[1], ev.actionMasked)
         }
         return super.dispatchTouchEvent(ev)
     }
 
-    /** Цвета и значки строки состояния и панели навигации подстраиваются под тему. */
     private fun applySystemBars() {
         window.setBackgroundDrawable(ColorDrawable(Palette.BG))
         window.statusBarColor = Palette.BG
@@ -339,7 +339,6 @@ class MainActivity : Activity() {
         rebuildUi()
     }
 
-    /** Интерфейс собирается заново с новыми цветами и плавно проявляется поверх старого. */
     private fun rebuildUi() {
         val old = host.getChildAt(0)
         val fresh = buildUi()
@@ -360,7 +359,7 @@ class MainActivity : Activity() {
             headsetText.text = headsetMessage()
         }
         renderStatus()
-        renderDebug()
+        renderDebugNow()
     }
 
     override fun onResume() {
@@ -376,6 +375,8 @@ class MainActivity : Activity() {
         try { unregisterReceiver(headsetReceiver) } catch (_: Exception) {}
         stopScan()
         handler.removeCallbacks(signalWatchdog)
+        handler.removeCallbacks(debugRunnable)
+        debugPending = false
     }
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
@@ -434,6 +435,7 @@ class MainActivity : Activity() {
     private fun parse(d: ByteArray) {
         val state = PodsParser.parse(d) ?: return
         val now = System.currentTimeMillis()
+        val changed = state != lastState
         lastSeen = now
         lastDataAt = now
         lastState = state
@@ -441,12 +443,12 @@ class MainActivity : Activity() {
             savedState = state
             Prefs.saveLast(this, state, now)
         }
-        applyState(state)
+        if (changed) applyState(state)
         setStatus(R.string.status_connected, true)
     }
 
     private fun applyState(state: PodsState, animate: Boolean = true) {
-        modelTitle.text = state.model
+        setTextIfChanged(modelTitle, state.model)
         leftRow.setLevel(state.left, state.chargingLeft, animate)
         rightRow.setLevel(state.right, state.chargingRight, animate)
         caseRow.setLevel(state.case, state.chargingCase, animate)
@@ -468,7 +470,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Пока живых данных нет, показываем последние значения приглушёнными и пишем, как давно они получены. */
     private fun renderUpdated() {
         if (!::updatedText.isInitialized) return
         val stale = lastDataAt > 0 && !statusLive
@@ -477,7 +478,7 @@ class MainActivity : Activity() {
         leftRow.alpha = alpha
         rightRow.alpha = alpha
         caseRow.alpha = alpha
-        if (stale && !switching) updatedText.text = updatedMessage()
+        if (stale && !switching) setTextIfChanged(updatedText, updatedMessage())
     }
 
     private fun headsetMessage() = headsetPct?.let { getString(R.string.headset_level, it) } ?: ""
@@ -496,12 +497,22 @@ class MainActivity : Activity() {
     }
 
     private fun renderDebug() {
-        if (!switching) debugLabel.text = debugMessage()
+        if (!::debugLabel.isInitialized || !debugVisible || debugPending) return
+        debugPending = true
+        handler.postDelayed(debugRunnable, 64)
+    }
+
+    private fun renderDebugNow() {
+        if (!::debugLabel.isInitialized || !debugVisible || switching) return
+        setTextIfChanged(debugLabel, debugMessage())
+    }
+
+    private fun setTextIfChanged(view: TextView, text: CharSequence) {
+        if (!view.text.contentEquals(text)) view.text = text
     }
 
     private fun developerMessage() = getString(R.string.developed_by) + " " + DEVELOPER
 
-    /** Имя разработчика выделяется цветом и жирным начертанием. */
     private fun styleDeveloper(text: String): CharSequence {
         val out = SpannableString(text)
         val from = text.indexOf(DEVELOPER)
@@ -540,10 +551,14 @@ class MainActivity : Activity() {
     private fun renderStatus() {
         if (!::signalText.isInitialized) return
         if (!switching) {
-            signalText.text = signalMessage()
-            statusLabel.text = chipMessage()
+            setTextIfChanged(signalText, signalMessage())
+            setTextIfChanged(statusLabel, chipMessage())
         }
-        (statusDot.background as GradientDrawable).setColor(if (statusLive) Palette.LIVE else Palette.ACCENT)
+        val dotColor = if (statusLive) Palette.LIVE else Palette.ACCENT
+        if (dotColor != shownDotColor) {
+            (statusDot.background as GradientDrawable).setColor(dotColor)
+            shownDotColor = dotColor
+        }
         spark.busy = !statusLive
         renderUpdated()
     }
@@ -616,9 +631,9 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(14), dp(16), dp(28))
         }
 
-        // Верхняя «плавающая» панель
         spark = SparkView(this)
         statusDot = View(this).apply { background = oval(Palette.ACCENT) }
+        shownDotColor = Palette.ACCENT
         statusLabel = mono(getString(R.string.chip_searching), 10f, Palette.PILL_TEXT, true).apply { isSingleLine = true }
         statusPill = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -650,7 +665,6 @@ class MainActivity : Activity() {
         }
         col.addView(topBar, LinearLayout.LayoutParams(-1, -2))
 
-        // Тёмная карточка
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(26), dp(24), dp(24))
@@ -690,6 +704,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 debugVisible = !debugVisible
                 debugLabel.visibility = if (debugVisible) View.VISIBLE else View.GONE
+                if (debugVisible) renderDebugNow()
             }
         }
         val buttons = LinearLayout(this).apply {
@@ -700,7 +715,6 @@ class MainActivity : Activity() {
         card.addView(buttons, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(24) })
         col.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
 
-        // Под карточкой
         hintText = mono(getString(R.string.hint_case), 10f)
         col.addView(hintText,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); marginStart = dp(8); marginEnd = dp(8) })
@@ -721,7 +735,6 @@ class MainActivity : Activity() {
             addView(developerText)
             setOnClickListener { openRepo() }
         }
-        // Распорка прижимает подвал к низу экрана, плитка и подпись стоят по центру
         col.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
         col.addView(developerRow, LinearLayout.LayoutParams(-2, -2).apply {
             topMargin = dp(24)

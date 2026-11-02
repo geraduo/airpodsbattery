@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.res.Configuration
 import java.util.Locale
 
-/** Настройки приложения: язык, тема и последние показания. */
 object Prefs {
     const val DEFAULT_LANG = "en"
     private const val FILE = "settings"
@@ -20,7 +19,6 @@ object Prefs {
     fun dark(c: Context): Boolean = prefs(c).getBoolean(KEY_DARK, false)
     fun setDark(c: Context, on: Boolean) = prefs(c).edit().putBoolean(KEY_DARK, on).apply()
 
-    /** Запоминает последние показания AirPods и время, когда они были получены. */
     fun saveLast(c: Context, s: PodsState, time: Long) {
         val parts = listOf(s.model, s.left ?: -1, s.right ?: -1, s.case ?: -1,
             s.chargingLeft, s.chargingRight, s.chargingCase, time)
@@ -45,7 +43,6 @@ object Prefs {
         }
     }
 
-    /** Контекст с выбранным в приложении языком: нужен службе и окну, у которых нет своего экрана. */
     fun localized(c: Context): Context {
         val config = Configuration(c.resources.configuration)
         config.setLocale(Locale(lang(c)))
