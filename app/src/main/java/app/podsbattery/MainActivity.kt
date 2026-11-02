@@ -1,5 +1,7 @@
 package app.podsbattery
 
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
 import android.Manifest
 import android.app.Activity
 import android.bluetooth.BluetoothHeadset
@@ -76,6 +78,10 @@ class MainActivity : Activity() {
     private var lang = Prefs.DEFAULT_LANG
     private var localizedRes: Resources? = null
     private var switching = false
+    private var statusAnimating = false
+    private var rowsAlpha = 1f
+    private var gridGesture = false
+    private lateinit var cardView: View
 
     private var statusRes = R.string.status_searching
     private var statusArg: Int? = null
@@ -215,7 +221,8 @@ class MainActivity : Activity() {
     }
 
     private fun scramble(
-        delay: Long, duration: Long, target: () -> String, tile: View?, onText: (CharSequence) -> Unit
+        delay: Long, duration: Long, target: () -> String, tile: View?, onText: (CharSequence) -> Unit,
+        onDone: (() -> Unit)? = null
     ) {
         val rnd = java.util.Random()
         var started = false
@@ -252,7 +259,38 @@ class MainActivity : Activity() {
                 tile.layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT
                 tile.requestLayout()
             }
+            onDone?.invoke()
         })
+    }
+
+    private fun playStatusTransition() {
+        statusAnimating = true
+        var pending = 2
+        val finish = {
+            pending--
+            if (pending == 0) {
+                statusAnimating = false
+                renderStatus()
+            }
+        }
+        scramble(0, 420, { chipMessage() }, statusPill, { statusLabel.text = it }, finish)
+        scramble(90, 520, { signalMessage() }, null, { signalText.text = it }, finish)
+    }
+
+    private fun setDotColor(color: Int, animate: Boolean) {
+        if (color == shownDotColor) return
+        val from = shownDotColor
+        shownDotColor = color
+        val drawable = statusDot.background as GradientDrawable
+        if (!animate) {
+            drawable.setColor(color)
+            return
+        }
+        ValueAnimator.ofObject(ArgbEvaluator(), from, color).apply {
+            duration = 420
+            addUpdateListener { drawable.setColor(it.animatedValue as Int) }
+            start()
+        }
     }
 
     private fun playLanguageTransition() {
@@ -304,13 +342,23 @@ class MainActivity : Activity() {
             lastDataAt = time
             applyState(state)
         }
-        setStatus(R.string.status_searching)
+        setStatus(R.string.status_searching, animate = false)
+    }
+
+    private fun insideCard(x: Float, y: Float): Boolean {
+        if (!::cardView.isInitialized) return false
+        cardView.getLocationOnScreen(touchLoc)
+        return x >= touchLoc[0] && x <= touchLoc[0] + cardView.width &&
+            y >= touchLoc[1] && y <= touchLoc[1] + cardView.height
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (::pattern.isInitialized) {
-            pattern.getLocationOnScreen(touchLoc)
-            pattern.touch(ev.rawX - touchLoc[0], ev.rawY - touchLoc[1], ev.actionMasked)
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) gridGesture = !insideCard(ev.rawX, ev.rawY)
+            if (gridGesture) {
+                pattern.getLocationOnScreen(touchLoc)
+                pattern.touch(ev.rawX - touchLoc[0], ev.rawY - touchLoc[1], ev.actionMasked)
+            }
         }
         return super.dispatchTouchEvent(ev)
     }
@@ -470,14 +518,42 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun renderUpdated() {
+    private fun renderUpdated(animate: Boolean = false) {
         if (!::updatedText.isInitialized) return
         val stale = lastDataAt > 0 && !statusLive
-        updatedText.visibility = if (stale) View.VISIBLE else View.INVISIBLE
         val alpha = if (stale) 0.55f else 1f
-        leftRow.alpha = alpha
-        rightRow.alpha = alpha
-        caseRow.alpha = alpha
+        if (alpha != rowsAlpha) {
+            rowsAlpha = alpha
+            for (row in arrayOf<View>(leftRow, rightRow, caseRow)) {
+                row.animate().cancel()
+                if (animate) {
+                    row.animate().alpha(alpha).setDuration(320)
+                } else {
+                    row.alpha = alpha
+                }
+            }
+        }
+        if (stale) {
+            if (updatedText.visibility != View.VISIBLE) {
+                updatedText.animate().cancel()
+                updatedText.visibility = View.VISIBLE
+                if (animate) {
+                    updatedText.alpha = 0f
+                    updatedText.animate().alpha(1f).setDuration(320)
+                } else {
+                    updatedText.alpha = 1f
+                }
+            }
+        } else if (updatedText.visibility == View.VISIBLE) {
+            updatedText.animate().cancel()
+            if (animate) {
+                updatedText.animate().alpha(0f).setDuration(320).withEndAction {
+                    if (!(lastDataAt > 0 && !statusLive)) updatedText.visibility = View.INVISIBLE
+                }
+            } else {
+                updatedText.visibility = View.INVISIBLE
+            }
+        }
         if (stale && !switching) setTextIfChanged(updatedText, updatedMessage())
     }
 
@@ -537,30 +613,34 @@ class MainActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun setStatus(res: Int, live: Boolean = false, arg: Int? = null) {
+    private fun setStatus(res: Int, live: Boolean = false, arg: Int? = null, animate: Boolean = true) {
         statusRes = res
         statusArg = arg
         statusLive = live
-        renderStatus()
+        renderStatus(animate)
     }
 
     private fun signalMessage(): String = statusArg?.let { getString(statusRes, it) } ?: getString(statusRes)
 
     private fun chipMessage(): String = getString(if (statusLive) R.string.chip_live else R.string.chip_searching)
 
-    private fun renderStatus() {
+    private fun renderStatus(animate: Boolean = false) {
         if (!::signalText.isInitialized) return
-        if (!switching) {
-            setTextIfChanged(signalText, signalMessage())
-            setTextIfChanged(statusLabel, chipMessage())
+        if (!switching && !statusAnimating) {
+            val chip = chipMessage()
+            val signal = signalMessage()
+            if (!statusLabel.text.contentEquals(chip) || !signalText.text.contentEquals(signal)) {
+                if (animate) {
+                    playStatusTransition()
+                } else {
+                    statusLabel.text = chip
+                    signalText.text = signal
+                }
+            }
         }
-        val dotColor = if (statusLive) Palette.LIVE else Palette.ACCENT
-        if (dotColor != shownDotColor) {
-            (statusDot.background as GradientDrawable).setColor(dotColor)
-            shownDotColor = dotColor
-        }
+        setDotColor(if (statusLive) Palette.LIVE else Palette.ACCENT, animate)
         spark.busy = !statusLive
-        renderUpdated()
+        renderUpdated(animate)
     }
 
     private fun tv(
@@ -625,6 +705,7 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             overScrollMode = View.OVER_SCROLL_NEVER
+            isVerticalScrollBarEnabled = false
         }
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -634,6 +715,7 @@ class MainActivity : Activity() {
         spark = SparkView(this)
         statusDot = View(this).apply { background = oval(Palette.ACCENT) }
         shownDotColor = Palette.ACCENT
+        rowsAlpha = 1f
         statusLabel = mono(getString(R.string.chip_searching), 10f, Palette.PILL_TEXT, true).apply { isSingleLine = true }
         statusPill = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -670,12 +752,13 @@ class MainActivity : Activity() {
             setPadding(dp(24), dp(26), dp(24), dp(24))
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF3B2B23.toInt(), 0xFF1F1D1B.toInt(), Palette.INK)
+                intArrayOf(0xFF47362D.toInt(), 0xFF2A2825.toInt(), 0xFF292826.toInt())
             ).apply {
                 cornerRadius = dp(36).toFloat()
                 setStroke(dp(1), Palette.CARD_STROKE)
             }
         }
+        cardView = card
         cardTitle = mono(getString(R.string.card_title), 10f, Palette.MUTED_DARK)
         card.addView(cardTitle)
         modelTitle = tv("AirPods", 34f, Palette.ON_DARK, "sans-serif", Typeface.BOLD, -0.03f)
@@ -704,6 +787,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 debugVisible = !debugVisible
                 debugLabel.visibility = if (debugVisible) View.VISIBLE else View.GONE
+                hintText.visibility = if (debugVisible) View.GONE else View.VISIBLE
                 if (debugVisible) renderDebugNow()
             }
         }
@@ -715,11 +799,11 @@ class MainActivity : Activity() {
         card.addView(buttons, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(24) })
         col.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
 
-        hintText = mono(getString(R.string.hint_case), 10f)
+        hintText = mono(getString(R.string.hint_case), 10f).apply { visibility = if (debugVisible) View.GONE else View.VISIBLE }
         col.addView(hintText,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); marginStart = dp(8); marginEnd = dp(8) })
         debugLabel = mono(getString(R.string.debug_empty), 10f).apply { visibility = if (debugVisible) View.VISIBLE else View.GONE; isAllCaps = false }
-        col.addView(debugLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14); marginStart = dp(8); marginEnd = dp(8) })
+        col.addView(debugLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); marginStart = dp(8); marginEnd = dp(8) })
         developerText = tv(styleDeveloper(developerMessage()), 12f, Palette.MUTED).apply { isSingleLine = true }
         developerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
