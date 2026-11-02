@@ -18,6 +18,7 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.random.Random
 
 object Palette {
     val INK = 0xFF1D1C1A.toInt()
@@ -249,10 +250,6 @@ class MatrixRainView(context: Context) : View(context) {
     }
 }
 
-private const val CELL_OFF: Byte = 0
-private const val CELL_OK: Byte = 1
-private const val CELL_REST_FAILED: Byte = 2
-
 class ThemeButton(context: Context) : View(context) {
     private val d = resources.displayMetrics.density
     private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = d }
@@ -316,16 +313,13 @@ class PatternView(context: Context) : View(context) {
     private val mid = FloatArray(3)
     private val pt = FloatArray(3)
 
-    private val rowsN = 19
     private val colsN = 13
-    private val cellCount = rowsN * colsN
-    private val restPaths = Array(cellCount) { Path() }
-    private val restState = ByteArray(cellCount)
-    private val restScale = FloatArray(cellCount)
-    private val restMidX = FloatArray(cellCount)
-    private val restMidY = FloatArray(cellCount)
-    private var builtW = -1
-    private var builtH = -1
+    private val phases = FloatArray(19 * colsN).also {
+        val rnd = Random(7)
+        for (i in it.indices) it[i] = rnd.nextFloat() * 2f * Math.PI.toFloat()
+    }
+    private val startMs = SystemClock.uptimeMillis()
+    private var lastDraw = 0L
 
     private var touching = false
     private var targetX = 0f
@@ -356,18 +350,29 @@ class PatternView(context: Context) : View(context) {
 
     private val ticker = object : Runnable {
         override fun run() {
+            if (!running) return
             fingerX += (targetX - fingerX) * 0.25f
             fingerY += (targetY - fingerY) * 0.25f
             strength += ((if (touching) 1f else 0f) - strength) * 0.16f
-            invalidate()
-            if (touching || strength > 0.01f) {
-                postOnAnimation(this)
-            } else {
-                strength = 0f
-                running = false
+            if (!touching && strength <= 0.01f) strength = 0f
+            val now = SystemClock.uptimeMillis()
+            if (strength > 0f || now - lastDraw >= 32L) {
+                lastDraw = now
                 invalidate()
             }
+            postOnAnimation(this)
         }
+    }
+
+    private fun startTicking() {
+        if (running) return
+        running = true
+        postOnAnimation(ticker)
+    }
+
+    private fun stopTicking() {
+        running = false
+        removeCallbacks(ticker)
     }
 
     fun touch(x: Float, y: Float, action: Int) {
@@ -385,16 +390,26 @@ class PatternView(context: Context) : View(context) {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> touching = false
         }
-        if (!running) {
-            running = true
-            postOnAnimation(ticker)
-        }
+        startTicking()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        startTicking()
     }
 
     override fun onDetachedFromWindow() {
-        removeCallbacks(ticker)
-        running = false
+        stopTicking()
         super.onDetachedFromWindow()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == VISIBLE) {
+            if (isAttachedToWindow) startTicking()
+        } else {
+            stopTicking()
+        }
     }
 
     private fun project(x: Float, y: Float, z: Float, out: FloatArray): Boolean {
@@ -414,14 +429,14 @@ class PatternView(context: Context) : View(context) {
     private fun withAlpha(color: Int, factor: Float): Int =
         (color and 0x00FFFFFF) or (((color ushr 24) * factor).toInt() shl 24)
 
-    private fun buildPath(wx: Float, wy: Float, lift: Float, ca: Float, sa: Float, out: Path): Boolean {
+    private fun buildPath(wx: Float, wy: Float, lift: Float, ca: Float, sa: Float, grow: Float, out: Path): Boolean {
         out.reset()
         var i = 0
         while (i < local.size) {
             val lx = local[i]
             val ly = local[i + 1]
-            val px = wx + lx * ca - ly * sa
-            val py = wy + lx * sa + ly * ca
+            val px = wx + (lx * ca - ly * sa) * grow
+            val py = wy + (lx * sa + ly * ca) * grow
             if (!project(px, py, lift, pt)) return false
             if (i == 0) out.moveTo(pt[0], pt[1]) else out.lineTo(pt[0], pt[1])
             i += 2
@@ -430,78 +445,64 @@ class PatternView(context: Context) : View(context) {
         return true
     }
 
-    private fun buildRest() {
-        builtW = width
-        builtH = height
-        val pitch = 76f * d
-        val margin = 90f * d
-        for (r in -9..9) {
-            for (c in -6..6) {
-                val idx = (r + 9) * colsN + (c + 6)
-                val wx = c * pitch
-                val wy = r * pitch
-                if (!project(wx, wy, 0f, mid) ||
-                    mid[0] < -margin || mid[0] > width + margin || mid[1] < -margin || mid[1] > height + margin
-                ) {
-                    restState[idx] = CELL_OFF
-                    continue
-                }
-                restMidX[idx] = mid[0]
-                restMidY[idx] = mid[1]
-                restScale[idx] = mid[2]
-                restState[idx] = if (buildPath(wx, wy, 0f, 1f, 0f, restPaths[idx])) CELL_OK else CELL_REST_FAILED
-            }
-        }
-    }
-
     override fun onDraw(canvas: Canvas) {
         centerX = width / 2f
         centerY = height / 2f
-        if (width != builtW || height != builtH) buildRest()
         val pitch = 76f * d
+        val margin = 90f * d
         val reach = 160f * d
+        val t = (SystemClock.uptimeMillis() - startMs) / 1000.0
+        val swayPhase = 2.0 * Math.PI * t / SWAY_PERIOD
+        val swayX = (0.14 * pitch * sin(swayPhase - 0.61)).toFloat()
+        val swayY = (0.15 * pitch * sin(swayPhase + 1.5)).toFloat()
+        val pulsePhase = 2.0 * Math.PI * t / PULSE_PERIOD
 
-        for (idx in 0 until cellCount) {
-            val state = restState[idx]
-            if (state == CELL_OFF) continue
+        for (r in -9..9) {
+            for (c in -6..6) {
+                val idx = (r + 9) * colsN + (c + 6)
+                val wx = c * pitch + swayX
+                val wy = r * pitch + swayY
+                if (!project(wx, wy, 0f, mid)) continue
+                if (mid[0] < -margin || mid[0] > width + margin || mid[1] < -margin || mid[1] > height + margin) continue
+                val scale = mid[2]
+                val grow = 1f + 0.05f * sin(pulsePhase + phases[idx]).toFloat()
 
-            var cellPath = restPaths[idx]
-            var moved = false
-            if (strength > 0f) {
-                val dx = restMidX[idx] - fingerX
-                val dy = restMidY[idx] - fingerY
-                val dist = sqrt(dx * dx + dy * dy)
-                if (dist < reach) {
-                    val k = 1f - dist / reach
-                    val angle = 20f * k * k * strength
-                    val lift = 44f * d * k * k * strength
-                    val rad = Math.toRadians(angle.toDouble())
-                    val ca = cos(rad).toFloat()
-                    val sa = sin(rad).toFloat()
-                    val r = idx / colsN - 9
-                    val c = idx % colsN - 6
-                    if (!buildPath(c * pitch, r * pitch, lift, ca, sa, path)) continue
-                    cellPath = path
-                    moved = true
+                var lift = 0f
+                var ca = 1f
+                var sa = 0f
+                if (strength > 0f) {
+                    val dx = mid[0] - fingerX
+                    val dy = mid[1] - fingerY
+                    val dist = sqrt(dx * dx + dy * dy)
+                    if (dist < reach) {
+                        val k = 1f - dist / reach
+                        val angle = 20f * k * k * strength
+                        lift = 44f * d * k * k * strength
+                        val rad = Math.toRadians(angle.toDouble())
+                        ca = cos(rad).toFloat()
+                        sa = sin(rad).toFloat()
+                    }
                 }
+                if (!buildPath(wx, wy, lift, ca, sa, grow, path)) continue
+
+                val fade = (((scale - 0.55f) / 0.6f).coerceIn(0.35f, 1f) * (1f + 0.5f * (grow - 1f))).coerceAtMost(1f)
+                outline.strokeWidth = 2f * d * scale * grow
+
+                canvas.save()
+                canvas.translate(-1.5f * d * scale, -1.5f * d * scale)
+                outline.color = withAlpha(Palette.PATTERN_HI, fade)
+                canvas.drawPath(path, outline)
+                canvas.restore()
+
+                outline.color = withAlpha(Palette.PATTERN, fade)
+                canvas.drawPath(path, outline)
             }
-            if (!moved && state != CELL_OK) continue
-
-            val scale = restScale[idx]
-            val fade = ((scale - 0.55f) / 0.6f).coerceIn(0.35f, 1f)
-            outline.strokeWidth = 2f * d * scale
-
-            canvas.save()
-            canvas.translate(-1.5f * d * scale, -1.5f * d * scale)
-            outline.color = withAlpha(Palette.PATTERN_HI, fade)
-            canvas.drawPath(cellPath, outline)
-            canvas.restore()
-
-            outline.color = withAlpha(Palette.PATTERN, fade)
-            canvas.drawPath(cellPath, outline)
         }
     }
 }
+
+private const val PULSE_PERIOD = 3.23
+private const val SWAY_PERIOD = 9.8
 
 class SparkView(context: Context) : View(context) {
     private val d = resources.displayMetrics.density
@@ -516,15 +517,15 @@ class SparkView(context: Context) : View(context) {
     private var last = 0L
     private var running = false
 
-    private val strip: Bitmap? = run {
+    private val strips: List<Bitmap> = listOf(R.drawable.spark_strip, R.drawable.spark_strip2).mapNotNull { id ->
         try {
-            BitmapFactory.decodeResource(resources, R.drawable.spark_strip, BitmapFactory.Options().apply { inScaled = false })
+            BitmapFactory.decodeResource(resources, id, BitmapFactory.Options().apply { inScaled = false })
         } catch (e: Exception) {
             null
         }
     }
-    private val frameSize = strip?.width ?: 0
-    private val frames = if (strip != null && frameSize > 0) maxOf(1, strip.height / frameSize) else 1
+    private val frameCounts = strips.map { maxOf(1, it.height / it.width) }
+    private val totalFrames = maxOf(1, frameCounts.sum())
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
     private val src = Rect()
     private val dst = Rect()
@@ -537,9 +538,9 @@ class SparkView(context: Context) : View(context) {
             val now = SystemClock.uptimeMillis()
             val dt = if (last == 0L) 16L else minOf(now - last, 64L)
             last = now
-            if (strip != null) {
+            if (strips.isNotEmpty()) {
                 stripMs += dt
-                val frame = ((stripMs * STRIP_FPS / 1000) % frames).toInt()
+                val frame = ((stripMs * STRIP_FPS / 1000) % totalFrames).toInt()
                 if (frame != shownFrame) {
                     shownFrame = frame
                     invalidate()
@@ -589,8 +590,8 @@ class SparkView(context: Context) : View(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        if (strip != null) {
-            drawStrip(canvas, strip)
+        if (strips.isNotEmpty()) {
+            drawStrip(canvas)
             return
         }
         val cx = width / 2f
@@ -613,8 +614,16 @@ class SparkView(context: Context) : View(context) {
         canvas.restore()
     }
 
-    private fun drawStrip(canvas: Canvas, bmp: Bitmap) {
-        src.set(0, shownFrame * frameSize, frameSize, (shownFrame + 1) * frameSize)
+    private fun drawStrip(canvas: Canvas) {
+        var local = shownFrame
+        var k = 0
+        while (k < frameCounts.size - 1 && local >= frameCounts[k]) {
+            local -= frameCounts[k]
+            k++
+        }
+        val bmp = strips[k]
+        val size = bmp.width
+        src.set(0, local * size, size, (local + 1) * size)
         dst.set(0, 0, width, height)
         canvas.drawBitmap(bmp, src, dst, bitmapPaint)
     }
