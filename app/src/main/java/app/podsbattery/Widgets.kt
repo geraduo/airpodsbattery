@@ -295,11 +295,7 @@ class ThemeButton(context: Context) : View(context) {
 
 class PatternView(context: Context) : View(context) {
     private val d = resources.displayMetrics.density
-    private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeJoin = Paint.Join.ROUND
-    }
-    private val path = Path()
+    private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
 
     private val local: FloatArray
 
@@ -319,6 +315,14 @@ class PatternView(context: Context) : View(context) {
         for (i in it.indices) it[i] = rnd.nextFloat() * 2f * Math.PI.toFloat()
     }
     private val startMs = SystemClock.uptimeMillis()
+
+    private val meshN = 6
+    private val verts = FloatArray((meshN + 1) * (meshN + 1) * 2)
+    private val texScale = 2f
+    private val texSize = Math.ceil((58f * d * texScale).toDouble()).toInt()
+    private val halfB = texSize / (2f * texScale)
+    private val texHi: Bitmap
+    private val texMain: Bitmap
 
     private var touching = false
     private var targetX = 0f
@@ -345,6 +349,30 @@ class PatternView(context: Context) : View(context) {
             }
         }
         local = pts.toFloatArray()
+        texHi = bake(Palette.PATTERN_HI)
+        texMain = bake(Palette.PATTERN)
+    }
+
+    private fun bake(color: Int): Bitmap {
+        val bmp = Bitmap.createBitmap(texSize, texSize, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeJoin = Paint.Join.ROUND
+            strokeWidth = 2f * d * texScale
+            this.color = color
+        }
+        val shape = Path()
+        var i = 0
+        while (i < local.size) {
+            val x = texSize / 2f + local[i] * texScale
+            val y = texSize / 2f + local[i + 1] * texScale
+            if (i == 0) shape.moveTo(x, y) else shape.lineTo(x, y)
+            i += 2
+        }
+        shape.close()
+        c.drawPath(shape, p)
+        return bmp
     }
 
     private val ticker = object : Runnable {
@@ -421,22 +449,19 @@ class PatternView(context: Context) : View(context) {
         return true
     }
 
-    private fun withAlpha(color: Int, factor: Float): Int =
-        (color and 0x00FFFFFF) or (((color ushr 24) * factor).toInt() shl 24)
-
-    private fun buildPath(wx: Float, wy: Float, lift: Float, ca: Float, sa: Float, grow: Float, out: Path): Boolean {
-        out.reset()
-        var i = 0
-        while (i < local.size) {
-            val lx = local[i]
-            val ly = local[i + 1]
-            val px = wx + (lx * ca - ly * sa) * grow
-            val py = wy + (lx * sa + ly * ca) * grow
-            if (!project(px, py, lift, pt)) return false
-            if (i == 0) out.moveTo(pt[0], pt[1]) else out.lineTo(pt[0], pt[1])
-            i += 2
+    private fun fillMesh(wx: Float, wy: Float, lift: Float, ca: Float, sa: Float, grow: Float): Boolean {
+        var n = 0
+        for (j in 0..meshN) {
+            val ly = -halfB + j * 2f * halfB / meshN
+            for (i in 0..meshN) {
+                val lx = -halfB + i * 2f * halfB / meshN
+                val px = wx + (lx * ca - ly * sa) * grow
+                val py = wy + (lx * sa + ly * ca) * grow
+                if (!project(px, py, lift, pt)) return false
+                verts[n++] = pt[0]
+                verts[n++] = pt[1]
+            }
         }
-        out.close()
         return true
     }
 
@@ -478,19 +503,17 @@ class PatternView(context: Context) : View(context) {
                         sa = sin(rad).toFloat()
                     }
                 }
-                if (!buildPath(wx, wy, lift, ca, sa, grow, path)) continue
+                if (!fillMesh(wx, wy, lift, ca, sa, grow)) continue
 
                 val fade = (((scale - 0.55f) / 0.6f).coerceIn(0.35f, 1f) * (1f + 0.5f * (grow - 1f))).coerceAtMost(1f)
-                outline.strokeWidth = 2f * d * scale * grow
+                bitmapPaint.alpha = (fade * 255f).roundToInt()
 
                 canvas.save()
                 canvas.translate(-1.5f * d * scale, -1.5f * d * scale)
-                outline.color = withAlpha(Palette.PATTERN_HI, fade)
-                canvas.drawPath(path, outline)
+                canvas.drawBitmapMesh(texHi, meshN, meshN, verts, 0, null, 0, bitmapPaint)
                 canvas.restore()
 
-                outline.color = withAlpha(Palette.PATTERN, fade)
-                canvas.drawPath(path, outline)
+                canvas.drawBitmapMesh(texMain, meshN, meshN, verts, 0, null, 0, bitmapPaint)
             }
         }
     }
