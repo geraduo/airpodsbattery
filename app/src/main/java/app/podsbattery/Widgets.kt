@@ -535,7 +535,10 @@ class SparkView(context: Context) : View(context) {
     private var last = 0L
     private var running = false
 
-    private val strips: List<Bitmap> = listOf(R.drawable.spark_strip, R.drawable.spark_strip2).mapNotNull { id ->
+    private val strips: List<Bitmap> = listOf(
+        R.drawable.spark_code_in, R.drawable.spark_code_loop, R.drawable.spark_code_out,
+        R.drawable.spark_read_in, R.drawable.spark_read_loop, R.drawable.spark_read_out
+    ).mapNotNull { id ->
         try {
             BitmapFactory.decodeResource(resources, id, BitmapFactory.Options().apply { inScaled = false })
         } catch (e: Exception) {
@@ -632,13 +635,6 @@ class SparkView(context: Context) : View(context) {
         canvas.restore()
     }
 
-    private fun drawFrame(canvas: Canvas, bmp: Bitmap, frame: Int) {
-        val size = bmp.width
-        src.set(0, frame * size, size, (frame + 1) * size)
-        dst.set(0, 0, width, height)
-        canvas.drawBitmap(bmp, src, dst, bitmapPaint)
-    }
-
     private fun drawStrip(canvas: Canvas) {
         var local = shownFrame
         var k = 0
@@ -646,21 +642,12 @@ class SparkView(context: Context) : View(context) {
             local -= frameCounts[k]
             k++
         }
-        var mix = 1f
-        if (strips.size > 1 && local < FADE_FRAMES) {
-            val u = (local + 1f) / (FADE_FRAMES + 1f)
-            mix = u * u * (3f - 2f * u)
-        }
-        if (mix < 1f) {
-            val prev = (k + strips.size - 1) % strips.size
-            bitmapPaint.alpha = ((1f - mix) * 255f).roundToInt()
-            drawFrame(canvas, strips[prev], local % frameCounts[prev])
-        }
-        bitmapPaint.alpha = (mix * 255f).roundToInt()
-        drawFrame(canvas, strips[k], local)
-        bitmapPaint.alpha = 255
+        val bmp = strips[k]
+        val size = bmp.width
+        src.set(0, local * size, size, (local + 1) * size)
+        dst.set(0, 0, width, height)
+        canvas.drawBitmap(bmp, src, dst, bitmapPaint)
     }
 }
 
-private const val FADE_FRAMES = 10
 private const val STRIP_FPS = 30L
