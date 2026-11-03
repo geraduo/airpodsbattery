@@ -5,6 +5,9 @@
     <string name="notif_channel">Уровень заряда</string>
     <string name="notif_channel_desc">Показывает заряд AirPods в шторке уведомлений</string>
     <string name="notif_stop">Остановить</string>
+    <string name="popup_label">Popup</string>
+    <string name="popup_on">вкл</string>
+    <string name="popup_off">выкл</string>
     <string name="short_left">Л</string>
     <string name="short_right">П</string>
     <string name="short_case">КЕЙС</string>

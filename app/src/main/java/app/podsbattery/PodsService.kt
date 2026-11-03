@@ -63,13 +63,21 @@ class PodsService : Service() {
         override fun onBatchScanResults(results: MutableList<ScanResult>) {
             results.forEach { onScanResult(0, it) }
         }
+
+        override fun onScanFailed(errorCode: Int) {
+            scanning = false
+        }
     }
 
     private val bluetoothReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
-            when (i.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
-                BluetoothAdapter.STATE_ON -> startScan()
-                BluetoothAdapter.STATE_OFF -> stopScan()
+            if (i.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                when (i.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                    BluetoothAdapter.STATE_ON -> restartScan()
+                    BluetoothAdapter.STATE_OFF -> stopScan()
+                }
+            } else {
+                restartScan()
             }
             notifyNow()
         }
@@ -77,6 +85,7 @@ class PodsService : Service() {
 
     private val refresh = object : Runnable {
         override fun run() {
+            if (!scanning) startScan()
             notifyNow()
             handler.postDelayed(this, REFRESH_MS)
         }
@@ -99,17 +108,20 @@ class PodsService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            Prefs.setPopup(this, false)
             shutDown()
             return START_NOT_STICKY
         }
         goForeground(buildNotification())
-        if (!hasPermissions()) {
+        if (!Prefs.popup(this) || !hasPermissions()) {
             shutDown()
             return START_NOT_STICKY
         }
         if (!receiverRegistered) {
             try {
                 val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+                filter.addAction(LocationManager.MODE_CHANGED_ACTION)
+                filter.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
                 if (Build.VERSION.SDK_INT >= 33) registerReceiver(bluetoothReceiver, filter, Context.RECEIVER_EXPORTED)
                 else registerReceiver(bluetoothReceiver, filter)
                 receiverRegistered = true
@@ -182,6 +194,11 @@ class PodsService : Service() {
             scanning = true
         } catch (_: Exception) {
         }
+    }
+
+    private fun restartScan() {
+        stopScan()
+        startScan()
     }
 
     private fun stopScan() {

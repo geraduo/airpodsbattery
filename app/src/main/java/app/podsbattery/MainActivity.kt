@@ -13,6 +13,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.content.pm.PackageManager
@@ -82,6 +83,10 @@ class MainActivity : Activity() {
     private var rowsAlpha = 1f
     private var gridGesture = false
     private lateinit var cardView: View
+    private lateinit var popupToggle: TextView
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == Prefs.KEY_POPUP) renderPopupToggle()
+    }
 
     private var statusRes = R.string.status_searching
     private var statusArg: Int? = null
@@ -304,6 +309,7 @@ class MainActivity : Activity() {
         }
         add({ chipMessage() }, statusPill) { statusLabel.text = it }
         add({ getString(R.string.card_title) }) { cardTitle.text = it }
+        add({ popupPlain() }, popupToggle) { popupToggle.text = it }
         add({ signalMessage() }) { signalText.text = it }
         if (updatedText.visibility == View.VISIBLE) add({ updatedMessage() }) { updatedText.text = it }
         add({ getString(R.string.row_left) }) { leftRow.title = it.toString() }
@@ -324,6 +330,7 @@ class MainActivity : Activity() {
             renderStatus()
             renderDebugNow()
             renderUpdated()
+            renderPopupToggle()
         }, total + 50)
     }
 
@@ -412,6 +419,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        Prefs.listen(this, prefsListener)
+        renderPopupToggle()
         if (hasPermissions()) {
             startScan()
             startPodsService()
@@ -425,6 +434,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        Prefs.unlisten(this, prefsListener)
         lastState?.let { if (lastDataAt > 0) Prefs.saveLast(this, it, lastDataAt) }
         try { unregisterReceiver(headsetReceiver) } catch (_: Exception) {}
         stopScan()
@@ -445,7 +455,39 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun popupState(): String = getString(if (Prefs.popup(this)) R.string.popup_on else R.string.popup_off)
+
+    private fun popupPlain(): String = (getString(R.string.popup_label) + " " + popupState()).uppercase()
+
+    private fun renderPopupToggle() {
+        if (!::popupToggle.isInitialized) return
+        val text = popupPlain()
+        val state = popupState().uppercase()
+        val styled = SpannableString(text)
+        styled.setSpan(
+            ForegroundColorSpan(if (Prefs.popup(this)) Palette.LIVE else Palette.MUTED_DARK),
+            text.length - state.length, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        popupToggle.text = styled
+    }
+
+    private fun togglePopup() {
+        val on = !Prefs.popup(this)
+        Prefs.setPopup(this, on)
+        renderPopupToggle()
+        if (on) {
+            startPodsService()
+            askNotificationPermission(true)
+        } else {
+            stopService(Intent(this, PodsService::class.java))
+        }
+    }
+
     private fun startPodsService() {
+        if (!Prefs.popup(this)) {
+            stopService(Intent(this, PodsService::class.java))
+            return
+        }
         if (!hasPermissions()) return
         try {
             startForegroundService(Intent(this, PodsService::class.java))
@@ -453,8 +495,9 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun askNotificationPermission() {
-        if (Build.VERSION.SDK_INT < 33 || Prefs.notifAsked(this)) return
+    private fun askNotificationPermission(force: Boolean = false) {
+        if (Build.VERSION.SDK_INT < 33 || !Prefs.popup(this)) return
+        if (!force && Prefs.notifAsked(this)) return
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
         Prefs.setNotifAsked(this)
         requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
@@ -788,7 +831,24 @@ class MainActivity : Activity() {
         }
         cardView = card
         cardTitle = mono(getString(R.string.card_title), 10f, Palette.MUTED_DARK)
-        card.addView(cardTitle)
+        popupToggle = mono(popupPlain(), 9f, Palette.MUTED_DARK, true).apply {
+            isAllCaps = false
+            setPadding(dp(11), dp(6), dp(11), dp(6))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(100).toFloat()
+                setColor(Color.TRANSPARENT)
+                setStroke(dp(1), Palette.LINE_DARK)
+            }
+            setOnClickListener { togglePopup() }
+        }
+        val cardHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(cardTitle, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(popupToggle, LinearLayout.LayoutParams(-2, -2))
+        }
+        card.addView(cardHeader, LinearLayout.LayoutParams(-1, -2))
+        renderPopupToggle()
         modelTitle = tv("AirPods", 34f, Palette.ON_DARK, "sans-serif", Typeface.BOLD, -0.03f)
         card.addView(modelTitle, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(12) })
         signalText = tv(getString(R.string.status_searching), 13f, Palette.MUTED_DARK)

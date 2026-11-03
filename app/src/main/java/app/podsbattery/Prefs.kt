@@ -1,6 +1,7 @@
 package app.podsbattery
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.res.Configuration
 import java.util.Locale
 
@@ -11,6 +12,7 @@ object Prefs {
     private const val KEY_LAST = "last"
     private const val KEY_DARK = "dark"
     private const val KEY_NOTIF_ASKED = "notif_asked"
+    const val KEY_POPUP = "popup"
 
     private fun prefs(c: Context) = c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -19,6 +21,13 @@ object Prefs {
 
     fun dark(c: Context): Boolean = prefs(c).getBoolean(KEY_DARK, false)
     fun setDark(c: Context, on: Boolean) = prefs(c).edit().putBoolean(KEY_DARK, on).apply()
+
+    fun popup(c: Context): Boolean = prefs(c).getBoolean(KEY_POPUP, true)
+    fun setPopup(c: Context, on: Boolean) = prefs(c).edit().putBoolean(KEY_POPUP, on).apply()
+    fun listen(c: Context, l: SharedPreferences.OnSharedPreferenceChangeListener) =
+        prefs(c).registerOnSharedPreferenceChangeListener(l)
+    fun unlisten(c: Context, l: SharedPreferences.OnSharedPreferenceChangeListener) =
+        prefs(c).unregisterOnSharedPreferenceChangeListener(l)
 
     fun notifAsked(c: Context): Boolean = prefs(c).getBoolean(KEY_NOTIF_ASKED, false)
     fun setNotifAsked(c: Context) = prefs(c).edit().putBoolean(KEY_NOTIF_ASKED, true).apply()
