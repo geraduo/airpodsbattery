@@ -2,6 +2,13 @@
 <resources>
     <string name="app_name">AirPods Battery</string>
 
+    <string name="notif_channel">Battery level</string>
+    <string name="notif_channel_desc">Shows AirPods battery level in the notification shade</string>
+    <string name="notif_stop">Stop</string>
+    <string name="short_left">L</string>
+    <string name="short_right">R</string>
+    <string name="short_case">CASE</string>
+
     <string name="chip_live">LIVE</string>
     <string name="chip_searching">SEARCH</string>
 

@@ -10,6 +10,7 @@ object Prefs {
     private const val KEY_LANG = "lang"
     private const val KEY_LAST = "last"
     private const val KEY_DARK = "dark"
+    private const val KEY_NOTIF_ASKED = "notif_asked"
 
     private fun prefs(c: Context) = c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -18,6 +19,9 @@ object Prefs {
 
     fun dark(c: Context): Boolean = prefs(c).getBoolean(KEY_DARK, false)
     fun setDark(c: Context, on: Boolean) = prefs(c).edit().putBoolean(KEY_DARK, on).apply()
+
+    fun notifAsked(c: Context): Boolean = prefs(c).getBoolean(KEY_NOTIF_ASKED, false)
+    fun setNotifAsked(c: Context) = prefs(c).edit().putBoolean(KEY_NOTIF_ASKED, true).apply()
 
     fun saveLast(c: Context, s: PodsState, time: Long) {
         val parts = listOf(s.model, s.left ?: -1, s.right ?: -1, s.case ?: -1,

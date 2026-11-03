@@ -412,7 +412,13 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (hasPermissions()) startScan() else requestPermissions(neededPermissions(), 1)
+        if (hasPermissions()) {
+            startScan()
+            startPodsService()
+            askNotificationPermission()
+        } else {
+            requestPermissions(neededPermissions(), 1)
+        }
         handler.post(signalWatchdog)
         registerHeadsetReceiver()
     }
@@ -429,7 +435,29 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, perms, results)
-        if (hasPermissions()) startScan() else setStatus(R.string.status_need_permission)
+        if (code == 2) return
+        if (hasPermissions()) {
+            startScan()
+            startPodsService()
+            askNotificationPermission()
+        } else {
+            setStatus(R.string.status_need_permission)
+        }
+    }
+
+    private fun startPodsService() {
+        if (!hasPermissions()) return
+        try {
+            startForegroundService(Intent(this, PodsService::class.java))
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun askNotificationPermission() {
+        if (Build.VERSION.SDK_INT < 33 || Prefs.notifAsked(this)) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        Prefs.setNotifAsked(this)
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
     }
 
     private fun neededPermissions(): Array<String> =

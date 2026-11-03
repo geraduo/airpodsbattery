@@ -2,6 +2,13 @@
 <resources>
     <string name="app_name">AirPods Battery</string>
 
+    <string name="notif_channel">Уровень заряда</string>
+    <string name="notif_channel_desc">Показывает заряд AirPods в шторке уведомлений</string>
+    <string name="notif_stop">Остановить</string>
+    <string name="short_left">Л</string>
+    <string name="short_right">П</string>
+    <string name="short_case">КЕЙС</string>
+
     <string name="chip_live">LIVE</string>
     <string name="chip_searching">ПОИСК</string>
 
