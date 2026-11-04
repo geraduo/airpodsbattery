@@ -33,6 +33,8 @@ object Prefs {
     fun setNotifAsked(c: Context) = prefs(c).edit().putBoolean(KEY_NOTIF_ASKED, true).apply()
 
     fun saveLast(c: Context, s: PodsState, time: Long) {
+        val stored = prefs(c).getString(KEY_LAST, null)?.split("|")?.getOrNull(7)?.toLongOrNull() ?: 0L
+        if (time < stored) return
         val parts = listOf(s.model, s.left ?: -1, s.right ?: -1, s.case ?: -1,
             s.chargingLeft, s.chargingRight, s.chargingCase, time)
         prefs(c).edit().putString(KEY_LAST, parts.joinToString("|")).apply()

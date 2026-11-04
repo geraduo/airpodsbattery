@@ -4,6 +4,7 @@ import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
 import android.Manifest
 import android.app.Activity
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
@@ -32,6 +33,7 @@ import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
+import android.transition.TransitionManager
 import android.view.Choreographer
 import android.view.Gravity
 import android.view.MotionEvent
@@ -84,6 +86,8 @@ class MainActivity : Activity() {
     private var gridGesture = false
     private lateinit var cardView: View
     private lateinit var topBarView: View
+    private lateinit var contentColumn: LinearLayout
+    private var retryAt = 0L
     private lateinit var popupToggle: TextView
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == Prefs.KEY_POPUP) renderPopupToggle()
@@ -139,13 +143,37 @@ class MainActivity : Activity() {
         }
 
         override fun onScanFailed(errorCode: Int) {
+            scanning = false
+            retryAt = System.currentTimeMillis() + 10_000
             setStatus(R.string.status_scan_error, arg = errorCode)
         }
     }
 
+    private val stateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            stopScan()
+            if (hasPermissions()) startScan()
+        }
+    }
+
+    private fun registerStateReceiver() {
+        val f = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        f.addAction(LocationManager.MODE_CHANGED_ACTION)
+        f.addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+        try {
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(stateReceiver, f, Context.RECEIVER_EXPORTED)
+            else registerReceiver(stateReceiver, f)
+        } catch (_: Exception) {}
+    }
+
     private val signalWatchdog = object : Runnable {
         override fun run() {
-            if (scanning && System.currentTimeMillis() - lastSeen > 8000) {
+            val now = System.currentTimeMillis()
+            if (!scanning && now >= retryAt && hasPermissions()) {
+                retryAt = now + 5000
+                startScan()
+            }
+            if (scanning && now - lastSeen > 8000) {
                 setStatus(R.string.status_no_signal)
             }
             renderUpdated()
@@ -192,7 +220,7 @@ class MainActivity : Activity() {
     }
 
     private fun setLanguage(code: String) {
-        if (code == lang || switching || themeSwitching) return
+        if (code == lang || switching || themeSwitching || statusAnimating) return
         lang = code
         Prefs.setLang(this, code)
         applyLocale(code)
@@ -310,7 +338,7 @@ class MainActivity : Activity() {
         }
         add({ chipMessage() }, statusPill) { statusLabel.text = it }
         add({ getString(R.string.card_title) }) { cardTitle.text = it }
-        add({ popupPlain() }, popupToggle) { popupToggle.text = it }
+        add({ popupPlain() }, popupToggle) { if (it is String) renderPopupToggle() else popupToggle.text = it }
         add({ signalMessage() }) { signalText.text = it }
         if (updatedText.visibility == View.VISIBLE) add({ updatedMessage() }) { updatedText.text = it }
         add({ getString(R.string.row_left) }) { leftRow.title = it.toString() }
@@ -377,8 +405,16 @@ class MainActivity : Activity() {
 
     private fun applySystemBars() {
         window.setBackgroundDrawable(ColorDrawable(Palette.BG))
-        window.statusBarColor = Palette.BG
-        window.navigationBarColor = Palette.BG
+        setBarColors(Palette.BG)
+        applyBarIcons()
+    }
+
+    private fun setBarColors(color: Int) {
+        window.statusBarColor = color
+        window.navigationBarColor = color
+    }
+
+    private fun applyBarIcons() {
         if (Build.VERSION.SDK_INT >= 30) {
             val flags = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
                 WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
@@ -405,9 +441,21 @@ class MainActivity : Activity() {
         restoreUi()
         fresh.alpha = 0f
         host.addView(fresh)
-        applySystemBars()
-        runTimed(0, 280, { f -> fresh.alpha = f }, {
+        window.setBackgroundDrawable(ColorDrawable(Palette.BG))
+        val fromBars = window.statusBarColor
+        val evaluator = ArgbEvaluator()
+        var iconsApplied = false
+        runTimed(0, 280, { f ->
+            fresh.alpha = f
+            setBarColors(evaluator.evaluate(f, fromBars, Palette.BG) as Int)
+            if (!iconsApplied && f >= 0.5f) {
+                iconsApplied = true
+                applyBarIcons()
+            }
+        }, {
             host.removeView(old)
+            setBarColors(Palette.BG)
+            applyBarIcons()
             themeSwitching = false
         })
     }
@@ -435,6 +483,7 @@ class MainActivity : Activity() {
         }
         handler.post(signalWatchdog)
         registerHeadsetReceiver()
+        registerStateReceiver()
     }
 
     override fun onPause() {
@@ -442,6 +491,7 @@ class MainActivity : Activity() {
         Prefs.unlisten(this, prefsListener)
         lastState?.let { if (lastDataAt > 0) Prefs.saveLast(this, it, lastDataAt) }
         try { unregisterReceiver(headsetReceiver) } catch (_: Exception) {}
+        try { unregisterReceiver(stateReceiver) } catch (_: Exception) {}
         stopScan()
         handler.removeCallbacks(signalWatchdog)
         handler.removeCallbacks(debugRunnable)
@@ -521,7 +571,7 @@ class MainActivity : Activity() {
         checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun startScan() {
+    private fun startScan(force: Boolean = false) {
         if (scanning) return
         val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
         if (adapter == null || !adapter.isEnabled) {
@@ -540,8 +590,9 @@ class MainActivity : Activity() {
         try {
             adapter.bluetoothLeScanner.startScan(null, settings, callback)
             scanning = true
-            lastSeen = System.currentTimeMillis()
-            setStatus(R.string.status_searching)
+            val now = System.currentTimeMillis()
+            lastSeen = now
+            if (force || !statusLive || now - lastDataAt > 8000) setStatus(R.string.status_searching)
         } catch (e: SecurityException) {
             setStatus(R.string.status_no_permission)
         }
@@ -637,7 +688,10 @@ class MainActivity : Activity() {
 
     private fun showHeadsetLevel(pct: Int) {
         headsetPct = pct
-        headsetText.visibility = View.VISIBLE
+        if (headsetText.visibility != View.VISIBLE) {
+            TransitionManager.beginDelayedTransition(contentColumn)
+            headsetText.visibility = View.VISIBLE
+        }
         if (!switching) headsetText.text = headsetMessage()
     }
 
@@ -787,6 +841,8 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(14), dp(16), dp(28))
         }
+        contentColumn = col
+        val narrow = resources.displayMetrics.widthPixels / resources.displayMetrics.density < 380f
 
         spark = SparkView(this)
         statusDot = View(this).apply { background = oval(Palette.ACCENT) }
@@ -814,7 +870,10 @@ class MainActivity : Activity() {
                 setStroke(dp(1), Palette.LINE)
             }
             addView(spark, LinearLayout.LayoutParams(dp(30), dp(30)))
-            addView(mono("AirPods", 12f, Palette.TEXT, true).apply { isSingleLine = true },
+            addView(mono("AirPods", 12f, Palette.TEXT, true).apply {
+                isSingleLine = true
+                if (narrow) visibility = View.INVISIBLE
+            },
                 LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
             addView(languageToggle(), LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
             addView(ThemeButton(this@MainActivity).apply { setOnClickListener { toggleTheme() } },
@@ -875,10 +934,11 @@ class MainActivity : Activity() {
         card.addView(headsetText, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(18) })
 
         refreshButton = pill(getString(R.string.btn_refresh), Palette.ON_DARK, Palette.INK, Palette.ON_DARK).apply {
-            setOnClickListener { stopScan(); startScan() }
+            setOnClickListener { stopScan(); startScan(true) }
         }
         diagButton = pill(getString(R.string.btn_diagnostics), Color.TRANSPARENT, Palette.ON_DARK, Palette.LINE_DARK).apply {
             setOnClickListener {
+                TransitionManager.beginDelayedTransition(contentColumn)
                 debugVisible = !debugVisible
                 debugLabel.visibility = if (debugVisible) View.VISIBLE else View.GONE
                 hintText.visibility = if (debugVisible) View.GONE else View.VISIBLE
