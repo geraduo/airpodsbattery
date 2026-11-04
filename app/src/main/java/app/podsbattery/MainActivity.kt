@@ -83,6 +83,7 @@ class MainActivity : Activity() {
     private var rowsAlpha = 1f
     private var gridGesture = false
     private lateinit var cardView: View
+    private lateinit var topBarView: View
     private lateinit var popupToggle: TextView
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == Prefs.KEY_POPUP) renderPopupToggle()
@@ -352,16 +353,20 @@ class MainActivity : Activity() {
         setStatus(R.string.status_searching, animate = false)
     }
 
-    private fun insideCard(x: Float, y: Float): Boolean {
-        if (!::cardView.isInitialized) return false
-        cardView.getLocationOnScreen(touchLoc)
-        return x >= touchLoc[0] && x <= touchLoc[0] + cardView.width &&
-            y >= touchLoc[1] && y <= touchLoc[1] + cardView.height
+    private fun insideView(view: View, x: Float, y: Float): Boolean {
+        view.getLocationOnScreen(touchLoc)
+        return x >= touchLoc[0] && x <= touchLoc[0] + view.width &&
+            y >= touchLoc[1] && y <= touchLoc[1] + view.height
+    }
+
+    private fun insidePanel(x: Float, y: Float): Boolean {
+        if (!::cardView.isInitialized || !::topBarView.isInitialized || !::developerRow.isInitialized) return false
+        return insideView(cardView, x, y) || insideView(topBarView, x, y) || insideView(developerRow, x, y)
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (::pattern.isInitialized) {
-            if (ev.actionMasked == MotionEvent.ACTION_DOWN) gridGesture = !insideCard(ev.rawX, ev.rawY)
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) gridGesture = !insidePanel(ev.rawX, ev.rawY)
             if (gridGesture) {
                 pattern.getLocationOnScreen(touchLoc)
                 pattern.touch(ev.rawX - touchLoc[0], ev.rawY - touchLoc[1], ev.actionMasked)
@@ -816,6 +821,7 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
             addView(statusPill)
         }
+        topBarView = topBar
         col.addView(topBar, LinearLayout.LayoutParams(-1, -2))
 
         val card = LinearLayout(this).apply {
@@ -831,13 +837,13 @@ class MainActivity : Activity() {
         }
         cardView = card
         cardTitle = mono(getString(R.string.card_title), 10f, Palette.MUTED_DARK)
-        popupToggle = mono(popupPlain(), 9f, Palette.MUTED_DARK, true).apply {
+        popupToggle = mono(popupPlain(), 9f, Palette.ON_DARK, true).apply {
             isAllCaps = false
             setPadding(dp(11), dp(6), dp(11), dp(6))
             background = GradientDrawable().apply {
                 cornerRadius = dp(100).toFloat()
-                setColor(Color.TRANSPARENT)
-                setStroke(dp(1), Palette.LINE_DARK)
+                setColor(0x2EFFFFFF)
+                setStroke(dp(1), 0x59FFFFFF)
             }
             setOnClickListener { togglePopup() }
         }
