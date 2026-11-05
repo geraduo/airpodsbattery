@@ -31,14 +31,9 @@
     <string name="charging">⚡ ЗАРЯДКА</string>
     <string name="headset_level">Общий заряд по подключению · %1$d%%</string>
 
-    <string name="btn_refresh">Обновить</string>
-    <string name="btn_diagnostics">Диагностика</string>
     <string name="hint_case">Точные данные приходят при открытой крышке кейса.</string>
     <string name="disclaimer">AirPods — товарный знак Apple Inc. Приложение независимое.</string>
 
-    <string name="debug_empty">Диагностика: —</string>
-    <string name="debug_main">Диагностика: пакетов %1$d, Apple %2$d, AirPods(07) %3$d; типы Apple: %4$s</string>
-    <string name="debug_headset">HFP-событий: %1$d (последнее: %2$s)</string>
     <string name="developed_by">Разработано</string>
     <string name="updated_now">Обновлено только что</string>
     <plurals name="updated_minutes">

@@ -60,10 +60,7 @@ class MainActivity : Activity() {
     private lateinit var leftRow: BatteryRow
     private lateinit var rightRow: BatteryRow
     private lateinit var caseRow: BatteryRow
-    private lateinit var debugLabel: TextView
     private lateinit var cardTitle: TextView
-    private lateinit var diagButton: TextView
-    private lateinit var refreshButton: TextView
     private lateinit var hintText: TextView
     private lateinit var disclaimerText: TextView
     private lateinit var developerText: TextView
@@ -73,7 +70,6 @@ class MainActivity : Activity() {
     private lateinit var spark: SparkView
     private lateinit var pattern: PatternView
     private var themeSwitching = false
-    private var debugVisible = false
     private lateinit var developerRow: LinearLayout
     private lateinit var rain: MatrixRainView
     private val langButtons = mutableMapOf<String, TextView>()
@@ -105,37 +101,15 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private val touchLoc = IntArray(2)
     private var shownDotColor = 0
-    private var debugPending = false
-    private val debugRunnable = Runnable {
-        debugPending = false
-        renderDebugNow()
-    }
     private var lastSeen = 0L
     private var scanning = false
 
-    private var total = 0
-    private var apple = 0
-    private var pairing = 0
-    private val types = java.util.TreeMap<Int, Int>()
-    private var headsetEvents = 0
-    private var lastCmd = "-"
+    private var lastRestart = 0L
 
     private val callback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            total++
-            val data = result.scanRecord?.getManufacturerSpecificData(PodsParser.APPLE_COMPANY_ID)
-            if (data != null) {
-                apple++
-                if (data.isNotEmpty()) {
-                    val t = data[0].toInt() and 0xFF
-                    types[t] = (types[t] ?: 0) + 1
-                    if (data[0] == 0x07.toByte()) {
-                        pairing++
-                        if (result.rssi >= -85) parse(data)
-                    }
-                }
-            }
-            renderDebug()
+            val data = result.scanRecord?.getManufacturerSpecificData(PodsParser.APPLE_COMPANY_ID) ?: return
+            if (data.isNotEmpty() && data[0] == 0x07.toByte() && result.rssi >= -85) parse(data)
         }
 
         override fun onBatchScanResults(results: MutableList<ScanResult>) {
@@ -176,6 +150,11 @@ class MainActivity : Activity() {
             if (scanning && now - lastSeen > 8000) {
                 setStatus(R.string.status_no_signal)
             }
+            if (scanning && now - lastSeen > 30_000 && now - lastRestart > 30_000) {
+                lastRestart = now
+                stopScan()
+                startScan(true)
+            }
             renderUpdated()
             handler.postDelayed(this, 1000)
         }
@@ -184,8 +163,6 @@ class MainActivity : Activity() {
     private val headsetReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             val cmd = i.getStringExtra(BluetoothHeadset.EXTRA_VENDOR_SPECIFIC_HEADSET_EVENT_CMD) ?: return
-            headsetEvents++
-            lastCmd = cmd
             @Suppress("DEPRECATION")
             val args = i.getSerializableExtra(BluetoothHeadset.EXTRA_VENDOR_SPECIFIC_HEADSET_EVENT_ARGS) as? Array<*>
             if (cmd == "+IPHONEACCEV" && args != null && args.isNotEmpty()) {
@@ -198,7 +175,6 @@ class MainActivity : Activity() {
                     k += 2
                 }
             }
-            renderDebug()
         }
     }
 
@@ -344,10 +320,7 @@ class MainActivity : Activity() {
         add({ getString(R.string.row_right) }) { rightRow.title = it.toString() }
         add({ getString(R.string.row_case) }) { caseRow.title = it.toString() }
         if (headsetPct != null) add({ headsetMessage() }) { headsetText.text = it }
-        add({ getString(R.string.btn_diagnostics) }, diagButton) { diagButton.text = it }
-        add({ getString(R.string.btn_refresh) }, refreshButton) { refreshButton.text = it }
         add({ getString(R.string.hint_case) }) { hintText.text = it }
-        if (debugLabel.visibility == View.VISIBLE) add({ debugMessage() }) { debugLabel.text = it }
         add({ developerMessage() }, developerRow) { developerText.text = if (it is SpannableString) it else styleDeveloper(it.toString()) }
         add({ disclaimerMessage() }) { disclaimerText.text = it }
 
@@ -356,7 +329,6 @@ class MainActivity : Activity() {
         handler.postDelayed({
             switching = false
             renderStatus()
-            renderDebugNow()
             renderUpdated()
         }, total + 50)
     }
@@ -465,7 +437,6 @@ class MainActivity : Activity() {
             headsetText.text = headsetMessage()
         }
         renderStatus()
-        renderDebugNow()
     }
 
     override fun onResume() {
@@ -492,8 +463,6 @@ class MainActivity : Activity() {
         try { unregisterReceiver(stateReceiver) } catch (_: Exception) {}
         stopScan()
         handler.removeCallbacks(signalWatchdog)
-        handler.removeCallbacks(debugRunnable)
-        debugPending = false
     }
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
@@ -569,7 +538,7 @@ class MainActivity : Activity() {
         checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun startScan(force: Boolean = false) {
+    private fun startScan(quiet: Boolean = false) {
         if (scanning) return
         val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
         if (adapter == null || !adapter.isEnabled) {
@@ -588,9 +557,11 @@ class MainActivity : Activity() {
         try {
             adapter.bluetoothLeScanner.startScan(null, settings, callback)
             scanning = true
-            val now = System.currentTimeMillis()
-            lastSeen = now
-            if (force || !statusLive || now - lastDataAt > 8000) setStatus(R.string.status_searching)
+            if (!quiet) {
+                val now = System.currentTimeMillis()
+                lastSeen = now
+                if (!statusLive || now - lastDataAt > 8000) setStatus(R.string.status_searching)
+            }
         } catch (e: SecurityException) {
             setStatus(R.string.status_no_permission)
         }
@@ -694,24 +665,6 @@ class MainActivity : Activity() {
         if (!switching) headsetText.text = headsetMessage()
     }
 
-    private fun debugMessage(): String {
-        if (total == 0 && headsetEvents == 0) return getString(R.string.debug_empty)
-        val t = types.entries.joinToString(", ") { String.format("%02X", it.key) + "x" + it.value }
-        val main = getString(R.string.debug_main, total, apple, pairing, t)
-        return if (headsetEvents > 0) main + " | " + getString(R.string.debug_headset, headsetEvents, lastCmd) else main
-    }
-
-    private fun renderDebug() {
-        if (!::debugLabel.isInitialized || !debugVisible || debugPending) return
-        debugPending = true
-        handler.postDelayed(debugRunnable, 64)
-    }
-
-    private fun renderDebugNow() {
-        if (!::debugLabel.isInitialized || !debugVisible || switching) return
-        setTextIfChanged(debugLabel, debugMessage())
-    }
-
     private fun setTextIfChanged(view: TextView, text: CharSequence) {
         if (!view.text.contentEquals(text)) view.text = text
     }
@@ -789,17 +742,6 @@ class MainActivity : Activity() {
             .apply { isAllCaps = true }
 
     private fun oval(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
-
-    private fun pill(text: String, bg: Int, fg: Int, stroke: Int?) =
-        tv(text, 14f, fg, "sans-serif-medium").apply {
-            isSingleLine = true
-            setPadding(dp(20), dp(13), dp(20), dp(13))
-            background = GradientDrawable().apply {
-                cornerRadius = dp(100).toFloat()
-                setColor(bg)
-                if (stroke != null) setStroke(dp(1), stroke)
-            }
-        }
 
     private fun languageToggle() = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -932,31 +874,11 @@ class MainActivity : Activity() {
         headsetText = mono("", 10f, Palette.MUTED_DARK).apply { visibility = View.GONE; isAllCaps = false }
         card.addView(headsetText, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(18) })
 
-        refreshButton = pill(getString(R.string.btn_refresh), Palette.ON_DARK, Palette.INK, Palette.ON_DARK).apply {
-            setOnClickListener { stopScan(); startScan(true) }
-        }
-        diagButton = pill(getString(R.string.btn_diagnostics), Color.TRANSPARENT, Palette.ON_DARK, Palette.LINE_DARK).apply {
-            setOnClickListener {
-                TransitionManager.beginDelayedTransition(contentColumn)
-                debugVisible = !debugVisible
-                debugLabel.visibility = if (debugVisible) View.VISIBLE else View.GONE
-                hintText.visibility = if (debugVisible) View.GONE else View.VISIBLE
-                if (debugVisible) renderDebugNow()
-            }
-        }
-        val buttons = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            addView(diagButton)
-            addView(refreshButton, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
-        }
-        card.addView(buttons, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(24) })
         col.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
 
-        hintText = mono(getString(R.string.hint_case), 10f).apply { visibility = if (debugVisible) View.GONE else View.VISIBLE }
+        hintText = mono(getString(R.string.hint_case), 10f)
         col.addView(hintText,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); marginStart = dp(8); marginEnd = dp(8) })
-        debugLabel = mono(getString(R.string.debug_empty), 10f).apply { visibility = if (debugVisible) View.VISIBLE else View.GONE; isAllCaps = false }
-        col.addView(debugLabel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); marginStart = dp(8); marginEnd = dp(8) })
         developerText = tv(styleDeveloper(developerMessage()), 12f, Palette.MUTED).apply { isSingleLine = true }
         developerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL

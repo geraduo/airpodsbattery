@@ -32,7 +32,7 @@ Everything runs locally: the app only needs Bluetooth and never uses the interne
 - Animated spark icon that is lively while searching and calm when data is live
 - Light and dark themes with a toggle in the top bar, on a soft 2.5D grid of rounded squares that lift and tilt under your finger
 - Remembers the last known values and shows how long ago they were updated, so the screen is never empty on launch
-- Built-in diagnostics: shows which packets the phone is receiving
+- Updates on its own: scanning runs continuously and restarts itself if no data arrives, no buttons to press
 - Two interface languages: English (default) and Russian, switched with the **EN / RU** toggle in the top bar; the choice is remembered
 - No third-party libraries: plain Android SDK, the UI is built in code
 
@@ -116,14 +116,13 @@ The APK will be at `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Troubleshooting
 
-Press the **Diagnostics** button on the main screen. The line it shows tells you how many packets the phone has received:
+Look at the status line under the model name:
 
 | What you see | What it means |
 | --- | --- |
-| Packets `0` | Missing permissions, or Bluetooth or location is off |
-| Packets received, `Apple 0` | The phone sees other devices, but no Apple products |
-| `Apple` present, but `AirPods(07) 0` | The earbuds are not broadcasting the needed data: open the case lid and disconnect the earbuds from other devices |
-| `AirPods(07)` grows, but no values shown | Open an issue and include the diagnostics line |
+| Permissions or Bluetooth / location message | Grant the permissions and turn Bluetooth and location on; scanning restarts by itself |
+| Searching | The phone sees no AirPods data yet: open the case lid and disconnect the earbuds from other devices |
+| No signal | Data stopped arriving: move closer or open the case lid; the app restarts scanning automatically |
 
 ## Project structure
 
