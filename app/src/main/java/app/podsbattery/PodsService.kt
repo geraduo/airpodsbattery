@@ -93,8 +93,20 @@ class PodsService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private fun adopt() {
+        val shared = PodsHub.state ?: return
+        val time = PodsHub.dataAt
+        if (time < dataAt) return
+        val changed = shared != state
+        val wasLive = isLive(System.currentTimeMillis())
+        state = shared
+        dataAt = time
+        if (changed || !wasLive) notifyNow()
+    }
+
     override fun onCreate() {
         super.onCreate()
+        PodsHub.listener = { adopt() }
         manager = getSystemService(NotificationManager::class.java)
         val channel = NotificationChannel(CHANNEL, getString(R.string.notif_channel), NotificationManager.IMPORTANCE_LOW)
         channel.description = getString(R.string.notif_channel_desc)
@@ -112,6 +124,7 @@ class PodsService : Service() {
             shutDown()
             return START_NOT_STICKY
         }
+        PodsHub.state?.let { if (PodsHub.dataAt >= dataAt) { state = it; dataAt = PodsHub.dataAt } }
         goForeground(buildNotification())
         if (!Prefs.popup(this) || !hasPermissions()) {
             shutDown()
@@ -135,6 +148,7 @@ class PodsService : Service() {
     }
 
     override fun onDestroy() {
+        PodsHub.listener = null
         handler.removeCallbacks(refresh)
         stopScan()
         if (receiverRegistered) {
@@ -188,7 +202,10 @@ class PodsService : Service() {
         val filter = ScanFilter.Builder()
             .setManufacturerData(PodsParser.APPLE_COMPANY_ID, byteArrayOf(0x07), byteArrayOf(0xFF.toByte()))
             .build()
-        val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build()
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+            .setReportDelay(1)
+            .build()
         try {
             bt.bluetoothLeScanner?.startScan(listOf(filter), settings, callback)
             scanning = true

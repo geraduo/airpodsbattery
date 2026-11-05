@@ -338,7 +338,6 @@ class MainActivity : Activity() {
         }
         add({ chipMessage() }, statusPill) { statusLabel.text = it }
         add({ getString(R.string.card_title) }) { cardTitle.text = it }
-        add({ popupPlain() }, popupToggle) { if (it is String) renderPopupToggle() else popupToggle.text = it }
         add({ signalMessage() }) { signalText.text = it }
         if (updatedText.visibility == View.VISIBLE) add({ updatedMessage() }) { updatedText.text = it }
         add({ getString(R.string.row_left) }) { leftRow.title = it.toString() }
@@ -359,7 +358,6 @@ class MainActivity : Activity() {
             renderStatus()
             renderDebugNow()
             renderUpdated()
-            renderPopupToggle()
         }, total + 50)
     }
 
@@ -618,6 +616,7 @@ class MainActivity : Activity() {
             savedState = state
             Prefs.saveLast(this, state, now)
         }
+        PodsHub.publish(state, now)
         if (changed) applyState(state)
         setStatus(R.string.status_connected, true)
     }
