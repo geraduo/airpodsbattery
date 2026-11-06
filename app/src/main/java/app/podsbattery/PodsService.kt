@@ -45,13 +45,15 @@ class PodsService : Service() {
     private var state: PodsState? = null
     private var dataAt = 0L
     private var receiverRegistered = false
+    private val stabilizer = PodsStabilizer()
 
     private val callback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val data = result.scanRecord?.getManufacturerSpecificData(PodsParser.APPLE_COMPANY_ID) ?: return
             if (data.isEmpty() || data[0] != 0x07.toByte() || result.rssi < -85) return
-            val parsed = PodsParser.parse(data) ?: return
+            val raw = PodsParser.parse(data) ?: return
             val now = System.currentTimeMillis()
+            val parsed = stabilizer.push(raw, now) ?: return
             val changed = parsed != state
             val wasLive = isLive(now)
             state = parsed

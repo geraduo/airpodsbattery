@@ -105,6 +105,7 @@ class MainActivity : Activity() {
     private var scanning = false
 
     private var lastRestart = 0L
+    private val stabilizer = PodsStabilizer()
 
     private val callback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -197,6 +198,7 @@ class MainActivity : Activity() {
 
     private fun setLanguage(code: String) {
         if (code == lang || switching || themeSwitching || statusAnimating) return
+        if (::rain.isInitialized && rain.playing) return
         lang = code
         Prefs.setLang(this, code)
         applyLocale(code)
@@ -232,13 +234,24 @@ class MainActivity : Activity() {
 
     private fun scramble(
         delay: Long, duration: Long, target: () -> String, tile: View?, onText: (CharSequence) -> Unit,
-        onDone: (() -> Unit)? = null
+        onDone: (() -> Unit)? = null, cancelled: (() -> Boolean)? = null
     ) {
         val rnd = java.util.Random()
         var started = false
+        var snapped = false
         var fromWidth = 0
         var toWidth = 0
         runTimed(delay, duration, { f ->
+            if (snapped) return@runTimed
+            if (cancelled?.invoke() == true) {
+                snapped = true
+                onText(target())
+                if (tile != null) {
+                    tile.layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                    tile.requestLayout()
+                }
+                return@runTimed
+            }
             val text = target()
             if (tile != null && !started) {
                 started = true
@@ -264,10 +277,12 @@ class MainActivity : Activity() {
                 tile.requestLayout()
             }
         }, {
-            onText(target())
-            if (tile != null) {
-                tile.layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT
-                tile.requestLayout()
+            if (!snapped) {
+                onText(target())
+                if (tile != null) {
+                    tile.layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                    tile.requestLayout()
+                }
             }
             onDone?.invoke()
         })
@@ -283,8 +298,8 @@ class MainActivity : Activity() {
                 renderStatus()
             }
         }
-        scramble(0, 420, { chipMessage() }, statusPill, { statusLabel.text = it }, finish)
-        scramble(90, 520, { signalMessage() }, null, { signalText.text = it }, finish)
+        scramble(0, 420, { chipMessage() }, statusPill, { statusLabel.text = it }, finish, { statusLive })
+        scramble(90, 520, { signalMessage() }, null, { signalText.text = it }, finish, { statusLive })
     }
 
     private fun setDotColor(color: Int, animate: Boolean) {
@@ -577,10 +592,11 @@ class MainActivity : Activity() {
     }
 
     private fun parse(d: ByteArray) {
-        val state = PodsParser.parse(d) ?: return
+        val raw = PodsParser.parse(d) ?: return
         val now = System.currentTimeMillis()
-        val changed = state != lastState
         lastSeen = now
+        val state = stabilizer.push(raw, now) ?: return
+        val changed = state != lastState
         lastDataAt = now
         lastState = state
         if (state != savedState) {
@@ -712,9 +728,10 @@ class MainActivity : Activity() {
             val chip = chipMessage()
             val signal = signalMessage()
             if (!statusLabel.text.contentEquals(chip) || !signalText.text.contentEquals(signal)) {
-                if (animate) {
+                if (animate && !statusLive) {
                     playStatusTransition()
                 } else {
+                    if (animate && ::topBarView.isInitialized) TransitionManager.beginDelayedTransition(topBarView as ViewGroup)
                     statusLabel.text = chip
                     signalText.text = signal
                 }

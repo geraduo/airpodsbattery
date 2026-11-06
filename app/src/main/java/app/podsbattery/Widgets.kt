@@ -207,12 +207,15 @@ class MatrixRainView(context: Context) : View(context) {
     private var frame = 0
     private var startedAt = 0L
     private var length = 1L
+    var playing = false
+        private set
 
     private val ticker = object : Runnable {
         override fun run() {
             val f = (SystemClock.uptimeMillis() - startedAt).toFloat() / length
             if (f >= 1f) {
                 progress = -1f
+                playing = false
                 invalidate()
                 return
             }
@@ -227,6 +230,7 @@ class MatrixRainView(context: Context) : View(context) {
         removeCallbacks(ticker)
         startedAt = SystemClock.uptimeMillis()
         length = duration
+        playing = true
         post(ticker)
     }
 
