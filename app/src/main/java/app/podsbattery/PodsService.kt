@@ -262,18 +262,7 @@ class PodsService : Service() {
         }
     }
 
-    private fun dimmed(color: Int): Int {
-        val keep = 0.55f
-        val back = 0xFF2A2825.toInt()
-        fun mix(shift: Int): Int {
-            val c = (color shr shift) and 0xFF
-            val b = (back shr shift) and 0xFF
-            return (c * keep + b * (1f - keep)).toInt()
-        }
-        return (0xFF shl 24) or (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
-    }
-
-    private fun valueText(pct: Int?, dim: Boolean): CharSequence {
+    private fun valueText(pct: Int?): CharSequence {
         if (pct == null) {
             return SpannableString("—").apply {
                 setSpan(ForegroundColorSpan(Palette.MUTED_DARK), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -281,22 +270,18 @@ class PodsService : Service() {
         }
         val number = pct.toString()
         val out = SpannableStringBuilder(number).append("%")
-        if (dim) out.setSpan(ForegroundColorSpan(dimmed(Palette.ON_DARK)), 0, number.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         out.setSpan(RelativeSizeSpan(0.55f), number.length, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         out.setSpan(ForegroundColorSpan(Palette.MUTED_DARK), number.length, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         return out
     }
 
-    private fun itemText(label: String, pct: Int?, charging: Boolean, dim: Boolean): CharSequence {
+    private fun itemText(label: String, pct: Int?, charging: Boolean): CharSequence {
         val out = SpannableStringBuilder(label).append(' ')
-        out.setSpan(
-            ForegroundColorSpan(if (dim) dimmed(Palette.MUTED_DARK) else Palette.MUTED_DARK),
-            0, label.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
+        out.setSpan(ForegroundColorSpan(Palette.MUTED_DARK), 0, label.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         val start = out.length
         out.append(if (pct != null) "$pct%" else "—")
         out.setSpan(StyleSpan(Typeface.BOLD), start, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        val valueColor = if (pct == null) Palette.MUTED_DARK else if (dim) dimmed(Palette.ON_DARK) else Palette.ON_DARK
+        val valueColor = if (pct == null) Palette.MUTED_DARK else Palette.ON_DARK
         out.setSpan(ForegroundColorSpan(valueColor), start, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         if (charging) {
             val from = out.length
@@ -306,15 +291,14 @@ class PodsService : Service() {
         return out
     }
 
-    private fun segments(pct: Int?, dim: Boolean): Bitmap {
+    private fun segments(pct: Int?): Bitmap {
         val d = resources.displayMetrics.density
         val w = (100 * d).toInt()
         val h = (6 * d).toInt().coerceAtLeast(6)
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.TRACK_DARK }
-        val fillColor = Palette.forLevel(pct ?: 100)
-        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (dim) dimmed(fillColor) else fillColor }
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.forLevel(pct ?: 100) }
         val n = 10
         val gap = 2f * d
         val segW = (w - gap * (n - 1)) / n
@@ -331,12 +315,11 @@ class PodsService : Service() {
 
     private fun fillColumn(
         rv: RemoteViews, ctx: Context, label: Int, value: Int, bar: Int, charge: Int,
-        name: String, pct: Int?, charging: Boolean, dim: Boolean
+        name: String, pct: Int?, charging: Boolean
     ) {
         rv.setTextViewText(label, name)
-        rv.setTextColor(label, if (dim) dimmed(Palette.MUTED_DARK) else Palette.MUTED_DARK)
-        rv.setTextViewText(value, valueText(pct, dim))
-        rv.setImageViewBitmap(bar, segments(pct, dim))
+        rv.setTextViewText(value, valueText(pct))
+        rv.setImageViewBitmap(bar, segments(pct))
         rv.setTextViewText(charge, ctx.getString(R.string.charging))
         rv.setViewVisibility(charge, if (charging) View.VISIBLE else View.INVISIBLE)
     }
@@ -377,7 +360,6 @@ class PodsService : Service() {
             live -> ctx.getString(R.string.chip_live)
             else -> updatedMessage(ctx)
         }
-        val dim = s != null && !live
 
         val shortLeft = ctx.getString(R.string.short_left)
         val shortRight = ctx.getString(R.string.short_right)
@@ -393,9 +375,9 @@ class PodsService : Service() {
             collapsed.setViewVisibility(R.id.n_c_case, View.GONE)
         } else {
             collapsed.setTextViewText(R.id.n_title, title)
-            collapsed.setTextViewText(R.id.n_c_left, itemText(shortLeft, s.left, s.chargingLeft, dim))
-            collapsed.setTextViewText(R.id.n_c_right, itemText(shortRight, s.right, s.chargingRight, dim))
-            collapsed.setTextViewText(R.id.n_c_case, itemText(shortCase, s.case, s.chargingCase, dim))
+            collapsed.setTextViewText(R.id.n_c_left, itemText(shortLeft, s.left, s.chargingLeft))
+            collapsed.setTextViewText(R.id.n_c_right, itemText(shortRight, s.right, s.chargingRight))
+            collapsed.setTextViewText(R.id.n_c_case, itemText(shortCase, s.case, s.chargingCase))
         }
 
         expanded.setTextViewText(R.id.n_title, title)
@@ -403,15 +385,15 @@ class PodsService : Service() {
         expanded.setTextColor(R.id.n_status, if (live && blocked == null) Palette.LIVE else Palette.MUTED_DARK)
         fillColumn(
             expanded, ctx, R.id.n_left_label, R.id.n_left_value, R.id.n_left_bar, R.id.n_left_charge,
-            ctx.getString(R.string.row_left), s?.left, s?.chargingLeft == true, dim
+            ctx.getString(R.string.row_left), s?.left, s?.chargingLeft == true
         )
         fillColumn(
             expanded, ctx, R.id.n_right_label, R.id.n_right_value, R.id.n_right_bar, R.id.n_right_charge,
-            ctx.getString(R.string.row_right), s?.right, s?.chargingRight == true, dim
+            ctx.getString(R.string.row_right), s?.right, s?.chargingRight == true
         )
         fillColumn(
             expanded, ctx, R.id.n_case_label, R.id.n_case_value, R.id.n_case_bar, R.id.n_case_charge,
-            ctx.getString(R.string.row_case), s?.case, s?.chargingCase == true, dim
+            ctx.getString(R.string.row_case), s?.case, s?.chargingCase == true
         )
 
         val summary = if (s == null) status else listOf(

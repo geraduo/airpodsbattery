@@ -5,10 +5,13 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.os.SystemClock
 import android.view.MotionEvent
@@ -128,6 +131,65 @@ class BatteryRow(context: Context, title: String) : View(context) {
     private var charging = false
     private var anim: ValueAnimator? = null
 
+    var stale = false
+        set(value) {
+            if (field == value) return
+            field = value
+            if (value) startShimmer() else stopShimmer()
+            invalidate()
+        }
+    private val shimmerMatrix = Matrix()
+    private var shimmerShader: LinearGradient? = null
+    private var shimmerOn = false
+    private val shimmerTick = object : Runnable {
+        override fun run() {
+            if (!shimmerOn) return
+            invalidate()
+            postOnAnimation(this)
+        }
+    }
+
+    private fun startShimmer() {
+        if (shimmerOn || !isAttachedToWindow) return
+        shimmerOn = true
+        postOnAnimation(shimmerTick)
+    }
+
+    private fun stopShimmer() {
+        shimmerOn = false
+        removeCallbacks(shimmerTick)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (stale) startShimmer()
+    }
+
+    override fun onDetachedFromWindow() {
+        stopShimmer()
+        super.onDetachedFromWindow()
+    }
+
+    private fun shimmerFor(x: Float, textWidth: Float): LinearGradient {
+        val band = 46 * d
+        val shader = shimmerShader ?: run {
+            val dim = (Palette.ON_DARK and 0x00FFFFFF) or (0x78 shl 24)
+            LinearGradient(
+                0f, 0f, band, 0f,
+                intArrayOf(dim, Palette.ON_DARK, dim), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+            ).also { shimmerShader = it }
+        }
+        val cycle = 3200L
+        val t = (SystemClock.uptimeMillis() % cycle) / cycle.toFloat()
+        val sweep = (t / 0.7f).coerceAtMost(1f)
+        val eased = sweep * sweep * (3f - 2f * sweep)
+        val start = x - band
+        val end = x + textWidth
+        shimmerMatrix.setTranslate(start + (end - start) * eased, 0f)
+        shader.setLocalMatrix(shimmerMatrix)
+        return shader
+    }
+
     fun setLevel(pct: Int?, isCharging: Boolean, animate: Boolean = true) {
         val newLevel = pct ?: -1
         if (newLevel == level && isCharging == charging) return
@@ -159,8 +221,11 @@ class BatteryRow(context: Context, title: String) : View(context) {
         if (level >= 0) {
             val num = shown.roundToInt().toString()
             numPaint.color = Palette.ON_DARK
+            val numWidth = numPaint.measureText(num)
+            numPaint.shader = if (stale) shimmerFor(x0, numWidth) else null
             canvas.drawText(num, x0, 32 * d, numPaint)
-            canvas.drawText("%", x0 + numPaint.measureText(num) + 3 * d, 32 * d, pctPaint)
+            numPaint.shader = null
+            canvas.drawText("%", x0 + numWidth + 3 * d, 32 * d, pctPaint)
         } else {
             numPaint.color = Palette.MUTED_DARK
             canvas.drawText("—", x0, 32 * d, numPaint)

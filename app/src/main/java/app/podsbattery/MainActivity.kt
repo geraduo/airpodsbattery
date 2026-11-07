@@ -78,7 +78,6 @@ class MainActivity : Activity() {
     private var localizedRes: Resources? = null
     private var switching = false
     private var statusAnimating = false
-    private var rowsAlpha = 1f
     private var gridGesture = false
     private lateinit var cardView: View
     private lateinit var topBarView: View
@@ -323,12 +322,13 @@ class MainActivity : Activity() {
         var index = 0
         val step = 90L
         val length = 520L
-        fun add(target: () -> String, tile: View? = null, onText: (CharSequence) -> Unit) {
-            scramble(index * step, length, target, tile, onText)
+        fun add(target: () -> String, tile: View? = null, cancelled: (() -> Boolean)? = null, onText: (CharSequence) -> Unit) {
+            scramble(index * step, length, target, tile, onText, null, cancelled)
             index++
         }
-        add({ chipMessage() }, statusPill) { statusLabel.text = it }
+        if (!statusLive) add({ chipMessage() }, statusPill, { statusLive }) { statusLabel.text = it }
         add({ getString(R.string.card_title) }) { cardTitle.text = it }
+        add({ popupPlain() }, popupToggle) { if (it is String) renderPopupToggle() else popupToggle.text = it }
         add({ signalMessage() }) { signalText.text = it }
         if (updatedText.visibility == View.VISIBLE) add({ updatedMessage() }) { updatedText.text = it }
         add({ getString(R.string.row_left) }) { leftRow.title = it.toString() }
@@ -634,18 +634,9 @@ class MainActivity : Activity() {
     private fun renderUpdated(animate: Boolean = false) {
         if (!::updatedText.isInitialized) return
         val stale = lastDataAt > 0 && !statusLive
-        val alpha = if (stale) 0.55f else 1f
-        if (alpha != rowsAlpha) {
-            rowsAlpha = alpha
-            for (row in arrayOf<View>(leftRow, rightRow, caseRow)) {
-                row.animate().cancel()
-                if (animate) {
-                    row.animate().alpha(alpha).setDuration(320)
-                } else {
-                    row.alpha = alpha
-                }
-            }
-        }
+        leftRow.stale = stale
+        rightRow.stale = stale
+        caseRow.stale = stale
         if (stale) {
             if (updatedText.visibility != View.VISIBLE) {
                 updatedText.animate().cancel()
@@ -805,7 +796,6 @@ class MainActivity : Activity() {
         spark = SparkView(this)
         statusDot = View(this).apply { background = oval(Palette.ACCENT) }
         shownDotColor = Palette.ACCENT
-        rowsAlpha = 1f
         statusLabel = mono(getString(R.string.chip_searching), 10f, Palette.PILL_TEXT, true).apply { isSingleLine = true }
         statusPill = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL

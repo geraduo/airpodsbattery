@@ -5,7 +5,7 @@
     <string name="notif_channel">Battery level</string>
     <string name="notif_channel_desc">Shows AirPods battery level in the notification shade</string>
     <string name="notif_stop">Stop</string>
-    <string name="popup_label">Popup</string>
+    <string name="popup_label">Notification</string>
     <string name="popup_on">on</string>
     <string name="popup_off">off</string>
     <string name="short_left">L</string>
