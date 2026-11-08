@@ -5,13 +5,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.LinearGradient
-import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
-import android.graphics.Shader
 import android.graphics.Typeface
 import android.os.SystemClock
 import android.view.MotionEvent
@@ -131,65 +128,6 @@ class BatteryRow(context: Context, title: String) : View(context) {
     private var charging = false
     private var anim: ValueAnimator? = null
 
-    var stale = false
-        set(value) {
-            if (field == value) return
-            field = value
-            if (value) startShimmer() else stopShimmer()
-            invalidate()
-        }
-    private val shimmerMatrix = Matrix()
-    private var shimmerShader: LinearGradient? = null
-    private var shimmerOn = false
-    private val shimmerTick = object : Runnable {
-        override fun run() {
-            if (!shimmerOn) return
-            invalidate()
-            postOnAnimation(this)
-        }
-    }
-
-    private fun startShimmer() {
-        if (shimmerOn || !isAttachedToWindow) return
-        shimmerOn = true
-        postOnAnimation(shimmerTick)
-    }
-
-    private fun stopShimmer() {
-        shimmerOn = false
-        removeCallbacks(shimmerTick)
-    }
-
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
-        if (stale) startShimmer()
-    }
-
-    override fun onDetachedFromWindow() {
-        stopShimmer()
-        super.onDetachedFromWindow()
-    }
-
-    private fun shimmerFor(x: Float, textWidth: Float): LinearGradient {
-        val band = 46 * d
-        val shader = shimmerShader ?: run {
-            val dim = (Palette.ON_DARK and 0x00FFFFFF) or (0x78 shl 24)
-            LinearGradient(
-                0f, 0f, band, 0f,
-                intArrayOf(dim, Palette.ON_DARK, dim), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
-            ).also { shimmerShader = it }
-        }
-        val cycle = 3200L
-        val t = (SystemClock.uptimeMillis() % cycle) / cycle.toFloat()
-        val sweep = (t / 0.7f).coerceAtMost(1f)
-        val eased = sweep * sweep * (3f - 2f * sweep)
-        val start = x - band
-        val end = x + textWidth
-        shimmerMatrix.setTranslate(start + (end - start) * eased, 0f)
-        shader.setLocalMatrix(shimmerMatrix)
-        return shader
-    }
-
     fun setLevel(pct: Int?, isCharging: Boolean, animate: Boolean = true) {
         val newLevel = pct ?: -1
         if (newLevel == level && isCharging == charging) return
@@ -221,11 +159,8 @@ class BatteryRow(context: Context, title: String) : View(context) {
         if (level >= 0) {
             val num = shown.roundToInt().toString()
             numPaint.color = Palette.ON_DARK
-            val numWidth = numPaint.measureText(num)
-            numPaint.shader = if (stale) shimmerFor(x0, numWidth) else null
             canvas.drawText(num, x0, 32 * d, numPaint)
-            numPaint.shader = null
-            canvas.drawText("%", x0 + numWidth + 3 * d, 32 * d, pctPaint)
+            canvas.drawText("%", x0 + numPaint.measureText(num) + 3 * d, 32 * d, pctPaint)
         } else {
             numPaint.color = Palette.MUTED_DARK
             canvas.drawText("—", x0, 32 * d, numPaint)
@@ -272,8 +207,10 @@ class MatrixRainView(context: Context) : View(context) {
     private var frame = 0
     private var startedAt = 0L
     private var length = 1L
-    var playing = false
-        private set
+    private var playing = false
+    private var direction = 1
+    private var startPos = 0f
+    private var currentPos = 0f
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -292,10 +229,17 @@ class MatrixRainView(context: Context) : View(context) {
     }
 
     fun play(duration: Long) {
+        if (playing) {
+            direction = -direction
+            startPos = currentPos
+        } else {
+            direction = 1
+            startPos = 0f
+        }
         removeCallbacks(ticker)
+        playing = true
         startedAt = SystemClock.uptimeMillis()
         length = duration
-        playing = true
         post(ticker)
     }
 
@@ -304,12 +248,14 @@ class MatrixRainView(context: Context) : View(context) {
         val cell = 15 * d
         val cols = minOf((width / cell).toInt(), shifts.size)
         val startX = (width - cols * cell) / 2f + cell / 2f
-        val travel = height + 14 * cell
+        val end = if (direction > 0) height + 14 * cell else -14 * cell
+        val pos = startPos + (end - startPos) * progress
+        currentPos = pos
         for (c in 0 until cols) {
-            val head = progress * travel - shifts[c] * 4 * cell
+            val head = pos - shifts[c] * 4 * cell
             val trail = trails[c]
             for (k in 0 until trail) {
-                val y = head - k * cell
+                val y = head - direction * k * cell
                 if (y < 0f || y > height + cell) continue
                 paint.alpha = if (k == 0) 220 else (140 * (1f - k / trail.toFloat())).toInt()
                 val g = glyphStrings[(c * 31 + k * 17 + (frame / 2) * 7) % glyphStrings.size]
@@ -319,7 +265,7 @@ class MatrixRainView(context: Context) : View(context) {
     }
 }
 
-class ThemeButton(context: Context) : View(context) {
+class ThemeButton(context: Context, startDark: Boolean = Palette.dark) : View(context) {
     private val d = resources.displayMetrics.density
     private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = d }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -329,22 +275,51 @@ class ThemeButton(context: Context) : View(context) {
         strokeWidth = 1.6f * d
     }
     private val moon = Path()
+    private val clip = Path()
+    private var iconDark = startDark
+    private var fromDark = startDark
+    private var toDark = startDark
+    private var progress = 1f
+    private var animator: ValueAnimator? = null
+
+    fun playTo(dark: Boolean) {
+        animator?.cancel()
+        if (dark == iconDark) {
+            progress = 1f
+            invalidate()
+            return
+        }
+        fromDark = iconDark
+        toDark = dark
+        progress = 0f
+        animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 900
+            addUpdateListener {
+                progress = it.animatedValue as Float
+                if (progress >= 1f) iconDark = toDark
+                invalidate()
+            }
+            start()
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        animator?.cancel()
+        super.onDetachedFromWindow()
+    }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         setMeasuredDimension((34 * d).toInt(), (34 * d).toInt())
     }
 
-    override fun onDraw(canvas: Canvas) {
-        val cx = width / 2f
-        val cy = height / 2f
-        fill.color = Palette.BAR
-        canvas.drawCircle(cx, cy, cx - d, fill)
-        ring.color = Palette.LINE
-        canvas.drawCircle(cx, cy, cx - d, ring)
-
-        fill.color = Palette.TEXT
-        rays.color = Palette.TEXT
-        if (Palette.dark) {
+    private fun drawIcon(canvas: Canvas, cx: Float, cy: Float, sun: Boolean, dy: Float, alpha: Float) {
+        val a = (alpha.coerceIn(0f, 1f) * 255f).toInt()
+        val color = (Palette.TEXT and 0x00FFFFFF) or (a shl 24)
+        fill.color = color
+        rays.color = color
+        canvas.save()
+        canvas.translate(0f, dy)
+        if (sun) {
             canvas.drawCircle(cx, cy, 3.8f * d, fill)
             for (i in 0 until 8) {
                 val angle = Math.toRadians(i * 45.0)
@@ -359,6 +334,33 @@ class ThemeButton(context: Context) : View(context) {
             moon.op(full, cut, Path.Op.DIFFERENCE)
             canvas.drawPath(moon, fill)
         }
+        canvas.restore()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val cx = width / 2f
+        val cy = height / 2f
+        fill.color = Palette.BAR
+        canvas.drawCircle(cx, cy, cx - d, fill)
+
+        canvas.save()
+        clip.reset()
+        clip.addCircle(cx, cy, cx - d, Path.Direction.CW)
+        canvas.clipPath(clip)
+        if (progress >= 1f) {
+            drawIcon(canvas, cx, cy, iconDark, 0f, 1f)
+        } else if (progress < 0.5f) {
+            val u = progress / 0.5f
+            drawIcon(canvas, cx, cy, fromDark, u * u * 14f * d, 1f - u)
+        } else {
+            val u = (progress - 0.5f) / 0.5f
+            val e = 1f - (1f - u) * (1f - u)
+            drawIcon(canvas, cx, cy, toDark, (1f - e) * 14f * d, u)
+        }
+        canvas.restore()
+
+        ring.color = Palette.LINE
+        canvas.drawCircle(cx, cy, cx - d, ring)
     }
 }
 

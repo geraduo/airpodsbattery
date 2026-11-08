@@ -19,6 +19,9 @@ import android.content.res.Configuration
 import android.content.res.Resources
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Matrix
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
@@ -69,7 +72,9 @@ class MainActivity : Activity() {
     private lateinit var host: FrameLayout
     private lateinit var spark: SparkView
     private lateinit var pattern: PatternView
-    private var themeSwitching = false
+    private var transitionGen = 0
+    private var shownThemeDark = Palette.dark
+    private var themeGen = 0
     private lateinit var developerRow: LinearLayout
     private lateinit var rain: MatrixRainView
     private val langButtons = mutableMapOf<String, TextView>()
@@ -104,6 +109,16 @@ class MainActivity : Activity() {
     private var scanning = false
 
     private var lastRestart = 0L
+    private val textShimmerMatrix = Matrix()
+    private var textShimmer: LinearGradient? = null
+    private var textShimmerOn = false
+    private val textShimmerTick = object : Runnable {
+        override fun run() {
+            if (!textShimmerOn || !::updatedText.isInitialized) return
+            stepTextShimmer()
+            updatedText.postOnAnimation(this)
+        }
+    }
     private val stabilizer = PodsStabilizer()
 
     private val callback = object : ScanCallback() {
@@ -196,23 +211,43 @@ class MainActivity : Activity() {
     }
 
     private fun setLanguage(code: String) {
-        if (code == lang || switching || themeSwitching || statusAnimating) return
-        if (::rain.isInitialized && rain.playing) return
+        if (code == lang) return
         lang = code
         Prefs.setLang(this, code)
         applyLocale(code)
-        updateLanguageToggle()
+        updateLanguageToggle(true)
         leftRow.chargingText = getString(R.string.charging)
         rightRow.chargingText = getString(R.string.charging)
         caseRow.chargingText = getString(R.string.charging)
         playLanguageTransition()
     }
 
-    private fun updateLanguageToggle() {
+    private fun updateLanguageToggle(animate: Boolean = false) {
         for ((code, button) in langButtons) {
             val active = code == lang
-            button.setTextColor(if (active) Palette.PILL_TEXT else Palette.MUTED)
-            (button.background as GradientDrawable).setColor(if (active) Palette.PILL_BG else Color.TRANSPARENT)
+            val textTo = if (active) Palette.PILL_TEXT else Palette.MUTED
+            val bgTo = if (active) Palette.PILL_BG else Color.TRANSPARENT
+            val drawable = button.background as GradientDrawable
+            (button.tag as? ValueAnimator)?.cancel()
+            if (!animate) {
+                button.setTextColor(textTo)
+                drawable.setColor(bgTo)
+                continue
+            }
+            val textFrom = button.currentTextColor
+            val bgNow = drawable.color?.defaultColor ?: Color.TRANSPARENT
+            val bgFrom = if (Color.alpha(bgNow) == 0) bgTo and 0x00FFFFFF else bgNow
+            val bgEnd = if (Color.alpha(bgTo) == 0) bgNow and 0x00FFFFFF else bgTo
+            val evaluator = ArgbEvaluator()
+            val anim = ValueAnimator.ofFloat(0f, 1f)
+            anim.duration = 260
+            anim.addUpdateListener {
+                val f = it.animatedFraction
+                button.setTextColor(evaluator.evaluate(f, textFrom, textTo) as Int)
+                drawable.setColor(evaluator.evaluate(f, bgFrom, bgEnd) as Int)
+            }
+            button.tag = anim
+            anim.start()
         }
     }
 
@@ -233,7 +268,7 @@ class MainActivity : Activity() {
 
     private fun scramble(
         delay: Long, duration: Long, target: () -> String, tile: View?, onText: (CharSequence) -> Unit,
-        onDone: (() -> Unit)? = null, cancelled: (() -> Boolean)? = null
+        onDone: (() -> Unit)? = null, cancelled: (() -> Boolean)? = null, superseded: (() -> Boolean)? = null
     ) {
         val rnd = java.util.Random()
         var started = false
@@ -242,6 +277,15 @@ class MainActivity : Activity() {
         var toWidth = 0
         runTimed(delay, duration, { f ->
             if (snapped) return@runTimed
+            if (superseded?.invoke() == true) {
+                snapped = true
+                onText(target())
+                if (tile != null) {
+                    tile.layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                    tile.requestLayout()
+                }
+                return@runTimed
+            }
             if (cancelled?.invoke() == true) {
                 snapped = true
                 onText(target())
@@ -276,6 +320,7 @@ class MainActivity : Activity() {
                 tile.requestLayout()
             }
         }, {
+            if (superseded?.invoke() == true) return@runTimed
             if (!snapped) {
                 onText(target())
                 if (tile != null) {
@@ -289,6 +334,7 @@ class MainActivity : Activity() {
 
     private fun playStatusTransition() {
         statusAnimating = true
+        val gen = transitionGen
         var pending = 2
         val finish = {
             pending--
@@ -297,8 +343,8 @@ class MainActivity : Activity() {
                 renderStatus()
             }
         }
-        scramble(0, 420, { chipMessage() }, statusPill, { statusLabel.text = it }, finish, { statusLive })
-        scramble(90, 520, { signalMessage() }, null, { signalText.text = it }, finish, { statusLive })
+        scramble(0, 420, { chipMessage() }, statusPill, { statusLabel.text = it }, finish, { statusLive }, { gen != transitionGen })
+        scramble(90, 520, { signalMessage() }, null, { signalText.text = it }, finish, { statusLive }, { gen != transitionGen })
     }
 
     private fun setDotColor(color: Int, animate: Boolean) {
@@ -318,12 +364,14 @@ class MainActivity : Activity() {
     }
 
     private fun playLanguageTransition() {
+        val gen = ++transitionGen
         switching = true
+        statusAnimating = false
         var index = 0
         val step = 90L
         val length = 520L
         fun add(target: () -> String, tile: View? = null, cancelled: (() -> Boolean)? = null, onText: (CharSequence) -> Unit) {
-            scramble(index * step, length, target, tile, onText, null, cancelled)
+            scramble(index * step, length, target, tile, onText, null, cancelled) { gen != transitionGen }
             index++
         }
         if (!statusLive) add({ chipMessage() }, statusPill, { statusLive }) { statusLabel.text = it }
@@ -342,6 +390,7 @@ class MainActivity : Activity() {
         val total = (index - 1) * step + length
         rain.play(total + 200)
         handler.postDelayed({
+            if (gen != transitionGen) return@postDelayed
             switching = false
             renderStatus()
             renderUpdated()
@@ -353,6 +402,7 @@ class MainActivity : Activity() {
         lang = Prefs.lang(this)
         applyLocale(lang)
         Palette.apply(Prefs.dark(this))
+        shownThemeDark = Palette.dark
         host = FrameLayout(this)
         setContentView(host)
         applySystemBars()
@@ -412,8 +462,6 @@ class MainActivity : Activity() {
     }
 
     private fun toggleTheme() {
-        if (switching || themeSwitching) return
-        themeSwitching = true
         val dark = !Palette.dark
         Prefs.setDark(this, dark)
         Palette.apply(dark)
@@ -421,7 +469,7 @@ class MainActivity : Activity() {
     }
 
     private fun rebuildUi() {
-        val old = host.getChildAt(0)
+        val gen = ++themeGen
         val fresh = buildUi()
         restoreUi()
         fresh.alpha = 0f
@@ -431,6 +479,7 @@ class MainActivity : Activity() {
         val evaluator = ArgbEvaluator()
         var iconsApplied = false
         runTimed(0, 280, { f ->
+            if (gen != themeGen) return@runTimed
             fresh.alpha = f
             setBarColors(evaluator.evaluate(f, fromBars, Palette.BG) as Int)
             if (!iconsApplied && f >= 0.5f) {
@@ -438,10 +487,12 @@ class MainActivity : Activity() {
                 applyBarIcons()
             }
         }, {
-            host.removeView(old)
+            if (gen != themeGen) return@runTimed
+            for (i in host.childCount - 1 downTo 0) {
+                if (host.getChildAt(i) !== fresh) host.removeViewAt(i)
+            }
             setBarColors(Palette.BG)
             applyBarIcons()
-            themeSwitching = false
         })
     }
 
@@ -631,12 +682,46 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun setUpdatedShimmer(on: Boolean) {
+        if (on == textShimmerOn) return
+        textShimmerOn = on
+        if (on) {
+            updatedText.postOnAnimation(textShimmerTick)
+        } else {
+            updatedText.paint.shader = null
+            updatedText.invalidate()
+        }
+    }
+
+    private fun stepTextShimmer() {
+        if (switching) {
+            updatedText.paint.shader = null
+            updatedText.invalidate()
+            return
+        }
+        val band = dp(64).toFloat()
+        val shader = textShimmer ?: run {
+            val dim = (Palette.MUTED_DARK and 0x00FFFFFF) or (0xA0 shl 24)
+            LinearGradient(
+                0f, 0f, band, 0f,
+                intArrayOf(dim, Palette.ON_DARK, dim), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+            ).also { textShimmer = it }
+        }
+        val textWidth = updatedText.paint.measureText(updatedText.text.toString())
+        val cycle = 3600L
+        val t = (SystemClock.uptimeMillis() % cycle) / cycle.toFloat()
+        val sweep = (t / 0.75f).coerceAtMost(1f)
+        val eased = sweep * sweep * (3f - 2f * sweep)
+        textShimmerMatrix.setTranslate(-band + (textWidth + band) * eased, 0f)
+        shader.setLocalMatrix(textShimmerMatrix)
+        updatedText.paint.shader = shader
+        updatedText.invalidate()
+    }
+
     private fun renderUpdated(animate: Boolean = false) {
         if (!::updatedText.isInitialized) return
         val stale = lastDataAt > 0 && !statusLive
-        leftRow.stale = stale
-        rightRow.stale = stale
-        caseRow.stale = stale
+        setUpdatedShimmer(stale)
         if (stale) {
             if (updatedText.visibility != View.VISIBLE) {
                 updatedText.animate().cancel()
@@ -824,8 +909,10 @@ class MainActivity : Activity() {
             },
                 LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
             addView(languageToggle(), LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
-            addView(ThemeButton(this@MainActivity).apply { setOnClickListener { toggleTheme() } },
-                LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+            val themeButton = ThemeButton(this@MainActivity, shownThemeDark).apply { setOnClickListener { toggleTheme() } }
+            if (shownThemeDark != Palette.dark) themeButton.post { themeButton.playTo(Palette.dark) }
+            shownThemeDark = Palette.dark
+            addView(themeButton, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
             addView(statusPill)
         }
         topBarView = topBar
@@ -867,6 +954,8 @@ class MainActivity : Activity() {
         signalText = tv(getString(R.string.status_searching), 13f, Palette.MUTED_DARK)
         card.addView(signalText, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
         updatedText = mono("", 10f, Palette.MUTED_DARK).apply { visibility = View.INVISIBLE }
+        textShimmerOn = false
+        textShimmer = null
         card.addView(updatedText, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
 
         leftRow = BatteryRow(this, getString(R.string.row_left))
