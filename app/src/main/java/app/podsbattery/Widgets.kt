@@ -14,6 +14,7 @@ import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -228,6 +229,26 @@ class MatrixRainView(context: Context) : View(context) {
         }
     }
 
+    fun contactDelay(anchor: View): Long {
+        if (height <= 0 || width <= 0) return 0L
+        val here = IntArray(2)
+        val there = IntArray(2)
+        getLocationOnScreen(here)
+        anchor.getLocationOnScreen(there)
+        val x = there[0] - here[0] + anchor.width / 2f
+        val y = there[1] - here[1] + anchor.height / 2f
+        val cell = 15 * d
+        val cols = minOf((width / cell).toInt(), shifts.size)
+        val startX = (width - cols * cell) / 2f + cell / 2f
+        val c = ((x - startX) / cell).roundToInt().coerceIn(0, cols - 1)
+        val end = if (direction > 0) height + 14 * cell else -14 * cell
+        val denominator = end - startPos
+        if (denominator == 0f) return 0L
+        val target = y + shifts[c] * 4 * cell
+        val p = ((target - startPos) / denominator).coerceIn(0f, 1f)
+        return (p * length).toLong()
+    }
+
     fun play(duration: Long) {
         if (playing) {
             direction = -direction
@@ -361,6 +382,80 @@ class ThemeButton(context: Context, startDark: Boolean = Palette.dark) : View(co
 
         ring.color = Palette.LINE
         canvas.drawCircle(cx, cy, cx - d, ring)
+    }
+}
+
+class JellyPill(context: Context) : View(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rect = RectF()
+    private var left = 0f
+    private var right = 0f
+    private var restWidth = 0f
+    private var ready = false
+    private var leftAnim: ValueAnimator? = null
+    private var rightAnim: ValueAnimator? = null
+
+    val animating: Boolean
+        get() = leftAnim?.isRunning == true || rightAnim?.isRunning == true
+
+    var color: Int
+        get() = paint.color
+        set(value) {
+            paint.color = value
+            invalidate()
+        }
+
+    fun snapTo(l: Float, r: Float) {
+        leftAnim?.cancel()
+        rightAnim?.cancel()
+        left = l
+        right = r
+        restWidth = r - l
+        ready = true
+        invalidate()
+    }
+
+    fun flowTo(l: Float, r: Float) {
+        if (!ready) {
+            snapTo(l, r)
+            return
+        }
+        leftAnim?.cancel()
+        rightAnim?.cancel()
+        restWidth = r - l
+        val movingRight = r > right
+        leftAnim = animateEdge(left, l, if (movingRight) 90L else 0L, if (movingRight) 2.2f else 1.3f) { left = it }
+        rightAnim = animateEdge(right, r, if (movingRight) 0L else 90L, if (movingRight) 1.3f else 2.2f) { right = it }
+    }
+
+    private fun animateEdge(from: Float, to: Float, delay: Long, tension: Float, setEdge: (Float) -> Unit): ValueAnimator =
+        ValueAnimator.ofFloat(from, to).apply {
+            startDelay = delay
+            duration = 420
+            interpolator = OvershootInterpolator(tension)
+            addUpdateListener {
+                setEdge(it.animatedValue as Float)
+                invalidate()
+            }
+            start()
+        }
+
+    override fun onDetachedFromWindow() {
+        leftAnim?.cancel()
+        rightAnim?.cancel()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        if (!ready) return
+        val w = right - left
+        if (w <= 0f) return
+        val stretch = if (restWidth > 0f) w / restWidth else 1f
+        val squash = (1f / sqrt(stretch)).coerceIn(0.75f, 1.12f)
+        val h = height * squash
+        val top = (height - h) / 2f
+        rect.set(left, top, right, top + h)
+        canvas.drawRoundRect(rect, h / 2f, h / 2f, paint)
     }
 }
 

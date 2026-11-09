@@ -78,6 +78,7 @@ class MainActivity : Activity() {
     private lateinit var developerRow: LinearLayout
     private lateinit var rain: MatrixRainView
     private val langButtons = mutableMapOf<String, TextView>()
+    private lateinit var langPill: JellyPill
 
     private var lang = Prefs.DEFAULT_LANG
     private var localizedRes: Resources? = null
@@ -216,9 +217,6 @@ class MainActivity : Activity() {
         Prefs.setLang(this, code)
         applyLocale(code)
         updateLanguageToggle(true)
-        leftRow.chargingText = getString(R.string.charging)
-        rightRow.chargingText = getString(R.string.charging)
-        caseRow.chargingText = getString(R.string.charging)
         playLanguageTransition()
     }
 
@@ -226,28 +224,27 @@ class MainActivity : Activity() {
         for ((code, button) in langButtons) {
             val active = code == lang
             val textTo = if (active) Palette.PILL_TEXT else Palette.MUTED
-            val bgTo = if (active) Palette.PILL_BG else Color.TRANSPARENT
-            val drawable = button.background as GradientDrawable
             (button.tag as? ValueAnimator)?.cancel()
             if (!animate) {
                 button.setTextColor(textTo)
-                drawable.setColor(bgTo)
                 continue
             }
             val textFrom = button.currentTextColor
-            val bgNow = drawable.color?.defaultColor ?: Color.TRANSPARENT
-            val bgFrom = if (Color.alpha(bgNow) == 0) bgTo and 0x00FFFFFF else bgNow
-            val bgEnd = if (Color.alpha(bgTo) == 0) bgNow and 0x00FFFFFF else bgTo
             val evaluator = ArgbEvaluator()
             val anim = ValueAnimator.ofFloat(0f, 1f)
-            anim.duration = 260
+            anim.duration = 320
             anim.addUpdateListener {
-                val f = it.animatedFraction
-                button.setTextColor(evaluator.evaluate(f, textFrom, textTo) as Int)
-                drawable.setColor(evaluator.evaluate(f, bgFrom, bgEnd) as Int)
+                button.setTextColor(evaluator.evaluate(it.animatedFraction, textFrom, textTo) as Int)
             }
             button.tag = anim
             anim.start()
+        }
+        if (::langPill.isInitialized) {
+            val target = langButtons[lang]
+            if (target != null && target.width > 0) {
+                if (animate) langPill.flowTo(target.left.toFloat(), target.right.toFloat())
+                else langPill.snapTo(target.left.toFloat(), target.right.toFloat())
+            }
         }
     }
 
@@ -367,34 +364,41 @@ class MainActivity : Activity() {
         val gen = ++transitionGen
         switching = true
         statusAnimating = false
-        var index = 0
-        val step = 90L
+        rain.play(1900L)
         val length = 520L
-        fun add(target: () -> String, tile: View? = null, cancelled: (() -> Boolean)? = null, onText: (CharSequence) -> Unit) {
-            scramble(index * step, length, target, tile, onText, null, cancelled) { gen != transitionGen }
-            index++
+        var finish = 0L
+        fun add(
+            anchor: View, target: () -> String, tile: View? = null,
+            cancelled: (() -> Boolean)? = null, onText: (CharSequence) -> Unit
+        ) {
+            val delay = rain.contactDelay(anchor)
+            finish = maxOf(finish, delay + length)
+            scramble(delay, length, target, tile, onText, null, cancelled) { gen != transitionGen }
         }
-        if (!statusLive) add({ chipMessage() }, statusPill, { statusLive }) { statusLabel.text = it }
-        add({ getString(R.string.card_title) }) { cardTitle.text = it }
-        add({ popupPlain() }, popupToggle) { if (it is String) renderPopupToggle() else popupToggle.text = it }
-        add({ signalMessage() }) { signalText.text = it }
-        if (updatedText.visibility == View.VISIBLE) add({ updatedMessage() }) { updatedText.text = it }
-        add({ getString(R.string.row_left) }) { leftRow.title = it.toString() }
-        add({ getString(R.string.row_right) }) { rightRow.title = it.toString() }
-        add({ getString(R.string.row_case) }) { caseRow.title = it.toString() }
-        if (headsetPct != null) add({ headsetMessage() }) { headsetText.text = it }
-        add({ getString(R.string.hint_case) }) { hintText.text = it }
-        add({ developerMessage() }, developerRow) { developerText.text = if (it is SpannableString) it else styleDeveloper(it.toString()) }
-        add({ disclaimerMessage() }) { disclaimerText.text = it }
+        if (!statusLive) add(statusPill, { chipMessage() }, statusPill, { statusLive }) { statusLabel.text = it }
+        add(cardTitle, { getString(R.string.card_title) }) { cardTitle.text = it }
+        add(popupToggle, { popupPlain() }, popupToggle) { if (it is String) renderPopupToggle() else popupToggle.text = it }
+        add(signalText, { signalMessage() }) { signalText.text = it }
+        if (updatedText.visibility == View.VISIBLE) add(updatedText, { updatedMessage() }) { updatedText.text = it }
+        add(leftRow, { getString(R.string.row_left) }) { leftRow.title = it.toString() }
+        add(rightRow, { getString(R.string.row_right) }) { rightRow.title = it.toString() }
+        add(caseRow, { getString(R.string.row_case) }) { caseRow.title = it.toString() }
+        if (headsetPct != null) add(headsetText, { headsetMessage() }) { headsetText.text = it }
+        add(hintText, { getString(R.string.hint_case) }) { hintText.text = it }
+        add(developerRow, { developerMessage() }, developerRow) { developerText.text = if (it is SpannableString) it else styleDeveloper(it.toString()) }
+        add(disclaimerText, { disclaimerMessage() }) { disclaimerText.text = it }
+        for (row in listOf(leftRow, rightRow, caseRow)) {
+            handler.postDelayed({
+                if (gen == transitionGen) row.chargingText = getString(R.string.charging)
+            }, rain.contactDelay(row))
+        }
 
-        val total = (index - 1) * step + length
-        rain.play(total + 200)
         handler.postDelayed({
             if (gen != transitionGen) return@postDelayed
             switching = false
             renderStatus()
             renderUpdated()
-        }, total + 50)
+        }, finish + 50)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -836,28 +840,51 @@ class MainActivity : Activity() {
 
     private fun oval(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
 
-    private fun languageToggle() = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(3), dp(3), dp(3), dp(3))
-        background = GradientDrawable().apply {
-            cornerRadius = dp(100).toFloat()
-            setColor(Color.TRANSPARENT)
-            setStroke(dp(1), Palette.LINE)
+    private fun languageToggle(): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
+        val pill = JellyPill(this).apply { color = Palette.PILL_BG }
+        langPill = pill
         for ((code, label) in listOf("en" to "EN", "ru" to "RU")) {
             val active = code == lang
             val button = mono(label, 10f, if (active) Palette.PILL_TEXT else Palette.MUTED, true).apply {
                 setPadding(dp(9), dp(6), dp(9), dp(6))
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(100).toFloat()
-                    setColor(if (active) Palette.PILL_BG else Color.TRANSPARENT)
-                }
                 setOnClickListener { setLanguage(code) }
             }
             langButtons[code] = button
-            addView(button)
+            row.addView(button)
         }
+        row.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            val target = langButtons[lang]
+            if (!pill.animating && target != null && target.width > 0) {
+                pill.snapTo(target.left.toFloat(), target.right.toFloat())
+            }
+        }
+        return FrameLayout(this).apply {
+            setPadding(dp(3), dp(3), dp(3), dp(3))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(100).toFloat()
+                setColor(Color.TRANSPARENT)
+                setStroke(dp(1), Palette.LINE)
+            }
+            addView(pill, FrameLayout.LayoutParams(-1, -1))
+            addView(row, FrameLayout.LayoutParams(-2, -2))
+        }
+    }
+
+    private fun stringIn(code: String, id: Int): String {
+        val config = Configuration(super.getResources().configuration)
+        config.setLocale(Locale(code))
+        return createConfigurationContext(config).getString(id)
+    }
+
+    private fun lockWidth(view: TextView, texts: List<String>, extra: Int) {
+        var widest = 0f
+        for (t in texts) widest = maxOf(widest, view.paint.measureText(t))
+        view.minWidth = widest.toInt() + extra + 1
+        view.gravity = Gravity.CENTER
     }
 
     private fun darkLine() = View(this).apply { setBackgroundColor(Palette.LINE_DARK) }
@@ -882,6 +909,13 @@ class MainActivity : Activity() {
         statusDot = View(this).apply { background = oval(Palette.ACCENT) }
         shownDotColor = Palette.ACCENT
         statusLabel = mono(getString(R.string.chip_searching), 10f, Palette.PILL_TEXT, true).apply { isSingleLine = true }
+        lockWidth(
+            statusLabel,
+            listOf("en", "ru").flatMap { l ->
+                listOf(R.string.chip_live, R.string.chip_searching).map { stringIn(l, it).uppercase() }
+            },
+            0
+        )
         statusPill = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -941,6 +975,15 @@ class MainActivity : Activity() {
             }
             setOnClickListener { togglePopup() }
         }
+        lockWidth(
+            popupToggle,
+            listOf("en", "ru").flatMap { l ->
+                listOf(R.string.popup_on, R.string.popup_off).map {
+                    (stringIn(l, R.string.popup_label) + " " + stringIn(l, it)).uppercase()
+                }
+            },
+            dp(22)
+        )
         val cardHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -976,6 +1019,7 @@ class MainActivity : Activity() {
         col.addView(hintText,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); marginStart = dp(8); marginEnd = dp(8) })
         developerText = tv(styleDeveloper(developerMessage()), 12f, Palette.MUTED).apply { isSingleLine = true }
+        lockWidth(developerText, listOf("en", "ru").map { stringIn(it, R.string.developed_by) + " " + DEVELOPER }, 0)
         developerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
