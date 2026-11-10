@@ -859,6 +859,12 @@ class MainActivity : Activity() {
             row.addView(button)
         }
         row.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            val params = pill.layoutParams
+            if (params.width != row.width || params.height != row.height) {
+                params.width = row.width
+                params.height = row.height
+                pill.layoutParams = params
+            }
             val target = langButtons[lang]
             if (!pill.animating && target != null && target.width > 0) {
                 pill.snapTo(target.left.toFloat(), target.right.toFloat())
@@ -871,7 +877,7 @@ class MainActivity : Activity() {
                 setColor(Palette.BAR)
                 setStroke(dp(1), Palette.LINE)
             }
-            addView(pill, FrameLayout.LayoutParams(-1, -1))
+            addView(pill, FrameLayout.LayoutParams(1, 1))
             addView(row, FrameLayout.LayoutParams(-2, -2))
         }
     }
