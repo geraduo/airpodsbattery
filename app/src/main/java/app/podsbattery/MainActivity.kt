@@ -843,7 +843,11 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val pill = JellyPill(this).apply { color = Palette.INK }
+        val pill = JellyPill(this).apply {
+            color = 0xFF000000.toInt()
+            outline = (Palette.ON_DARK and 0x00FFFFFF) or (0x40 shl 24)
+            outlineWidth = dp(1).toFloat()
+        }
         langPill = pill
         for ((code, label) in listOf("en" to "EN", "ru" to "RU")) {
             val active = code == lang
@@ -864,7 +868,7 @@ class MainActivity : Activity() {
             setPadding(dp(3), dp(3), dp(3), dp(3))
             background = GradientDrawable().apply {
                 cornerRadius = dp(100).toFloat()
-                setColor(Color.TRANSPARENT)
+                setColor(Palette.BAR)
                 setStroke(dp(1), Palette.LINE)
             }
             addView(pill, FrameLayout.LayoutParams(-1, -1))
@@ -1008,14 +1012,14 @@ class MainActivity : Activity() {
         card.addView(darkLine(), LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(14); bottomMargin = dp(14) })
         card.addView(caseRow, LinearLayout.LayoutParams(-1, -2))
 
+        hintText = mono(getString(R.string.hint_case), 10f, Palette.MUTED_DARK)
+        card.addView(hintText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
+
         headsetText = mono("", 10f, Palette.MUTED_DARK).apply { visibility = View.GONE; isAllCaps = false }
-        card.addView(headsetText, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(18) })
+        card.addView(headsetText, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(12) })
 
         col.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
 
-        hintText = mono(getString(R.string.hint_case), 10f)
-        col.addView(hintText,
-            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20); marginStart = dp(8); marginEnd = dp(8) })
         developerText = tv(styleDeveloper(developerMessage()), 12f, Palette.MUTED).apply { isSingleLine = true }
         lockWidth(developerText, listOf("en", "ru").map { stringIn(it, R.string.developed_by) + " " + DEVELOPER }, 0)
         developerRow = LinearLayout(this).apply {

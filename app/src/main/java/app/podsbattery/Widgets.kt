@@ -410,6 +410,7 @@ class ThemeButton(context: Context, startDark: Boolean = Palette.dark) : View(co
 
 class JellyPill(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val rect = RectF()
     private var left = 0f
     private var right = 0f
@@ -425,6 +426,20 @@ class JellyPill(context: Context) : View(context) {
         get() = paint.color
         set(value) {
             paint.color = value
+            invalidate()
+        }
+
+    var outline: Int
+        get() = strokePaint.color
+        set(value) {
+            strokePaint.color = value
+            invalidate()
+        }
+
+    var outlineWidth: Float
+        get() = strokePaint.strokeWidth
+        set(value) {
+            strokePaint.strokeWidth = value
             invalidate()
         }
 
@@ -485,6 +500,11 @@ class JellyPill(context: Context) : View(context) {
         val top = (height - h) / 2f
         rect.set(left, top, right, top + h)
         canvas.drawRoundRect(rect, h / 2f, h / 2f, paint)
+        val ow = strokePaint.strokeWidth
+        if (ow > 0f) {
+            rect.inset(ow / 2f, ow / 2f)
+            canvas.drawRoundRect(rect, h / 2f - ow / 2f, h / 2f - ow / 2f, strokePaint)
+        }
     }
 }
 
