@@ -223,7 +223,7 @@ class MainActivity : Activity() {
     private fun updateLanguageToggle(animate: Boolean = false) {
         for ((code, button) in langButtons) {
             val active = code == lang
-            val textTo = if (active) Palette.PILL_TEXT else Palette.MUTED
+            val textTo = if (active) Palette.ON_DARK else Palette.MUTED
             (button.tag as? ValueAnimator)?.cancel()
             if (!animate) {
                 button.setTextColor(textTo)
@@ -380,18 +380,16 @@ class MainActivity : Activity() {
         add(popupToggle, { popupPlain() }, popupToggle) { if (it is String) renderPopupToggle() else popupToggle.text = it }
         add(signalText, { signalMessage() }) { signalText.text = it }
         if (updatedText.visibility == View.VISIBLE) add(updatedText, { updatedMessage() }) { updatedText.text = it }
-        add(leftRow, { getString(R.string.row_left) }) { leftRow.title = it.toString() }
-        add(rightRow, { getString(R.string.row_right) }) { rightRow.title = it.toString() }
-        add(caseRow, { getString(R.string.row_case) }) { caseRow.title = it.toString() }
+        add(leftRow, { getString(R.string.row_left) }) { leftRow.title = it }
+        add(rightRow, { getString(R.string.row_right) }) { rightRow.title = it }
+        add(caseRow, { getString(R.string.row_case) }) { caseRow.title = it }
         if (headsetPct != null) add(headsetText, { headsetMessage() }) { headsetText.text = it }
         add(hintText, { getString(R.string.hint_case) }) { hintText.text = it }
         add(developerRow, { developerMessage() }, developerRow) { developerText.text = if (it is SpannableString) it else styleDeveloper(it.toString()) }
         add(disclaimerText, { disclaimerMessage() }) { disclaimerText.text = it }
-        for (row in listOf(leftRow, rightRow, caseRow)) {
-            handler.postDelayed({
-                if (gen == transitionGen) row.chargingText = getString(R.string.charging)
-            }, rain.contactDelay(row))
-        }
+        add(leftRow, { getString(R.string.charging) }) { leftRow.chargingText = it }
+        add(rightRow, { getString(R.string.charging) }) { rightRow.chargingText = it }
+        add(caseRow, { getString(R.string.charging) }) { caseRow.chargingText = it }
 
         handler.postDelayed({
             if (gen != transitionGen) return@postDelayed
@@ -845,11 +843,11 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val pill = JellyPill(this).apply { color = Palette.PILL_BG }
+        val pill = JellyPill(this).apply { color = Palette.INK }
         langPill = pill
         for ((code, label) in listOf("en" to "EN", "ru" to "RU")) {
             val active = code == lang
-            val button = mono(label, 10f, if (active) Palette.PILL_TEXT else Palette.MUTED, true).apply {
+            val button = mono(label, 10f, if (active) Palette.ON_DARK else Palette.MUTED, true).apply {
                 setPadding(dp(9), dp(6), dp(9), dp(6))
                 setOnClickListener { setLanguage(code) }
             }

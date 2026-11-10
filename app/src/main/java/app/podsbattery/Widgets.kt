@@ -11,6 +11,8 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.SystemClock
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.DecelerateInterpolator
@@ -91,9 +93,9 @@ object Palette {
 
 class BatteryRow(context: Context, title: String) : View(context) {
     private val d = resources.displayMetrics.density
-    var title: String = title
+    var title: CharSequence = title
         set(value) { field = value; invalidate() }
-    var chargingText: String = context.getString(R.string.charging)
+    var chargingText: CharSequence = context.getString(R.string.charging)
         set(value) { field = value; invalidate() }
     private val numPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.create("sans-serif", Typeface.BOLD)
@@ -149,6 +151,27 @@ class BatteryRow(context: Context, title: String) : View(context) {
         invalidate()
     }
 
+    private fun drawStyled(canvas: Canvas, text: CharSequence, xRight: Float, y: Float, paint: Paint, base: Int) {
+        val plain = text.toString()
+        var split = plain.length
+        if (text is Spanned) {
+            val spans = text.getSpans(0, text.length, ForegroundColorSpan::class.java)
+            if (spans.isNotEmpty()) split = spans.minOf { text.getSpanStart(it) }.coerceIn(0, plain.length)
+        }
+        val align = paint.textAlign
+        paint.textAlign = Paint.Align.LEFT
+        val start = xRight - paint.measureText(plain)
+        val head = plain.substring(0, split)
+        paint.color = base
+        canvas.drawText(head, start, y, paint)
+        if (split < plain.length) {
+            paint.color = Palette.MATRIX
+            canvas.drawText(plain.substring(split), start + paint.measureText(head), y, paint)
+            paint.color = base
+        }
+        paint.textAlign = align
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), (66 * d).toInt())
     }
@@ -167,9 +190,9 @@ class BatteryRow(context: Context, title: String) : View(context) {
             canvas.drawText("—", x0, 32 * d, numPaint)
         }
 
-        canvas.drawText(title, x1, 14 * d, labelPaint)
+        drawStyled(canvas, title, x1, 14 * d, labelPaint, Palette.MUTED_DARK)
         if (charging) {
-            canvas.drawText(chargingText, x1, 30 * d, subPaint)
+            drawStyled(canvas, chargingText, x1, 30 * d, subPaint, Palette.LIVE)
         }
 
         val n = 10
