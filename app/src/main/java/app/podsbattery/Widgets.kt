@@ -253,13 +253,17 @@ class MatrixRainView(context: Context) : View(context) {
     }
 
     fun contactDelay(anchor: View): Long {
+        val there = IntArray(2)
+        anchor.getLocationOnScreen(there)
+        return contactDelayAt(there[0] + anchor.width / 2f, there[1] + anchor.height / 2f)
+    }
+
+    fun contactDelayAt(screenX: Float, screenY: Float): Long {
         if (height <= 0 || width <= 0) return 0L
         val here = IntArray(2)
-        val there = IntArray(2)
         getLocationOnScreen(here)
-        anchor.getLocationOnScreen(there)
-        val x = there[0] - here[0] + anchor.width / 2f
-        val y = there[1] - here[1] + anchor.height / 2f
+        val x = screenX - here[0]
+        val y = screenY - here[1]
         val cell = 15 * d
         val cols = minOf((width / cell).toInt(), shifts.size)
         val startX = (width - cols * cell) / 2f + cell / 2f

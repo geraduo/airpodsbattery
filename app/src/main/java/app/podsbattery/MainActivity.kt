@@ -32,7 +32,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.Layout
 import android.text.SpannableString
+import android.text.StaticLayout
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
@@ -329,6 +331,90 @@ class MainActivity : Activity() {
         })
     }
 
+    private fun charDelays(view: TextView, text: String): LongArray {
+        if (text.isEmpty()) return LongArray(0)
+        val shown = if (view.transformationMethod != null) text.uppercase() else text
+        val inner = (view.width - view.paddingLeft - view.paddingRight).coerceAtLeast(1)
+        val desired = Layout.getDesiredWidth(shown, view.paint).toInt() + 1
+        val wrap = view.layoutParams?.width == ViewGroup.LayoutParams.WRAP_CONTENT
+        val layoutWidth = if (wrap) minOf(desired, resources.displayMetrics.widthPixels) else inner
+        val layout = StaticLayout.Builder.obtain(shown, 0, shown.length, view.paint, maxOf(layoutWidth, 1))
+            .setIncludePad(false)
+            .build()
+        val loc = IntArray(2)
+        view.getLocationOnScreen(loc)
+        val centered = (view.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.CENTER_HORIZONTAL
+        return LongArray(shown.length) { i ->
+            val line = layout.getLineForOffset(i)
+            var x = loc[0] + view.paddingLeft + layout.getPrimaryHorizontal(i)
+            if (centered) x += (inner - layout.getLineWidth(line)) / 2f
+            val y = loc[1] + view.paddingTop + (layout.getLineTop(line) + layout.getLineBottom(line)) / 2f
+            rain.contactDelayAt(x, y)
+        }
+    }
+
+    private fun rainText(
+        view: TextView, before: CharSequence, target: () -> String,
+        cancelled: (() -> Boolean)?, gen: Int, onText: (CharSequence) -> Unit
+    ): Long {
+        val delays = charDelays(view, target())
+        val dwell = 320L
+        val total = (delays.maxOrNull() ?: 0L) + dwell
+        val old = before.toString()
+        val rnd = java.util.Random()
+        var snapped = false
+        runTimed(0, total, { f ->
+            if (snapped) return@runTimed
+            if (gen != transitionGen || cancelled?.invoke() == true) {
+                snapped = true
+                onText(target())
+                return@runTimed
+            }
+            val elapsed = (f * total).toLong()
+            val text = target()
+            val length = maxOf(old.length, text.length)
+            val out = StringBuilder(length)
+            val orange = BooleanArray(length)
+            for (i in 0 until length) {
+                val d = if (delays.isEmpty()) 0L else delays[minOf(i, delays.size - 1)]
+                val dt = elapsed - d
+                if (i < text.length) {
+                    val c = text[i]
+                    if (dt >= dwell) {
+                        out.append(c)
+                    } else if (dt >= 0) {
+                        if (c.isWhitespace() || c in "·|%") {
+                            out.append(c)
+                        } else {
+                            out.append(scrambleGlyphs[rnd.nextInt(scrambleGlyphs.length)])
+                            orange[i] = true
+                        }
+                    } else {
+                        out.append(if (i < old.length) old[i] else ' ')
+                    }
+                } else if (dt < 0) {
+                    out.append(old[i])
+                }
+            }
+            val span = SpannableString(out)
+            var i = 0
+            while (i < out.length) {
+                if (orange[i]) {
+                    var j = i
+                    while (j < out.length && orange[j]) j++
+                    span.setSpan(ForegroundColorSpan(Palette.MATRIX), i, j, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    i = j
+                } else {
+                    i++
+                }
+            }
+            onText(span)
+        }, {
+            if (!snapped && gen == transitionGen) onText(target())
+        })
+        return total
+    }
+
     private fun playStatusTransition() {
         statusAnimating = true
         val gen = transitionGen
@@ -375,18 +461,21 @@ class MainActivity : Activity() {
             finish = maxOf(finish, delay + length)
             scramble(delay, length, target, tile, onText, null, cancelled) { gen != transitionGen }
         }
-        if (!statusLive) add(statusPill, { chipMessage() }, statusPill, { statusLive }) { statusLabel.text = it }
-        add(cardTitle, { getString(R.string.card_title) }) { cardTitle.text = it }
-        add(popupToggle, { popupPlain() }, popupToggle) { if (it is String) renderPopupToggle() else popupToggle.text = it }
-        add(signalText, { signalMessage() }) { signalText.text = it }
-        if (updatedText.visibility == View.VISIBLE) add(updatedText, { updatedMessage() }) { updatedText.text = it }
+        fun addText(view: TextView, target: () -> String, cancelled: (() -> Boolean)? = null, onText: (CharSequence) -> Unit) {
+            finish = maxOf(finish, rainText(view, view.text, target, cancelled, gen, onText))
+        }
+        if (!statusLive) addText(statusLabel, { chipMessage() }, { statusLive }) { statusLabel.text = it }
+        addText(cardTitle, { getString(R.string.card_title) }) { cardTitle.text = it }
+        addText(popupToggle, { popupPlain() }) { if (it is String) renderPopupToggle() else popupToggle.text = it }
+        addText(signalText, { signalMessage() }) { signalText.text = it }
+        if (updatedText.visibility == View.VISIBLE) addText(updatedText, { updatedMessage() }) { updatedText.text = it }
         add(leftRow, { getString(R.string.row_left) }) { leftRow.title = it }
         add(rightRow, { getString(R.string.row_right) }) { rightRow.title = it }
         add(caseRow, { getString(R.string.row_case) }) { caseRow.title = it }
-        if (headsetPct != null) add(headsetText, { headsetMessage() }) { headsetText.text = it }
-        add(hintText, { getString(R.string.hint_case) }) { hintText.text = it }
-        add(developerRow, { developerMessage() }, developerRow) { developerText.text = if (it is SpannableString) it else styleDeveloper(it.toString()) }
-        add(disclaimerText, { disclaimerMessage() }) { disclaimerText.text = it }
+        if (headsetPct != null) addText(headsetText, { headsetMessage() }) { headsetText.text = it }
+        addText(hintText, { getString(R.string.hint_case) }) { hintText.text = it }
+        addText(developerText, { developerMessage() }) { developerText.text = if (it is SpannableString) it else styleDeveloper(it.toString()) }
+        addText(disclaimerText, { disclaimerMessage() }) { disclaimerText.text = it }
         add(leftRow, { getString(R.string.charging) }) { leftRow.chargingText = it }
         add(rightRow, { getString(R.string.charging) }) { rightRow.chargingText = it }
         add(caseRow, { getString(R.string.charging) }) { caseRow.chargingText = it }
