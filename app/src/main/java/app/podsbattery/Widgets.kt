@@ -234,7 +234,6 @@ class MatrixRainView(context: Context) : View(context) {
     private var playing = false
     private var direction = 1
     private var startPos = 0f
-    private var currentPos = 0f
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -277,13 +276,8 @@ class MatrixRainView(context: Context) : View(context) {
     }
 
     fun play(duration: Long) {
-        if (playing) {
-            direction = -direction
-            startPos = currentPos
-        } else {
-            direction = 1
-            startPos = 0f
-        }
+        direction = if (playing) -direction else 1
+        startPos = if (direction > 0) 0f else height + 14 * 15 * d
         removeCallbacks(ticker)
         playing = true
         startedAt = SystemClock.uptimeMillis()
@@ -298,7 +292,6 @@ class MatrixRainView(context: Context) : View(context) {
         val startX = (width - cols * cell) / 2f + cell / 2f
         val end = if (direction > 0) height + 14 * cell else -14 * cell
         val pos = startPos + (end - startPos) * progress
-        currentPos = pos
         for (c in 0 until cols) {
             val head = pos - shifts[c] * 4 * cell
             val trail = trails[c]

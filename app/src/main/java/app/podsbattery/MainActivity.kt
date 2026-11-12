@@ -353,20 +353,28 @@ class MainActivity : Activity() {
         }
     }
 
+    private val rainBefore = HashMap<TextView, String>()
+
     private fun rainText(
-        view: TextView, before: CharSequence, target: () -> String,
+        view: TextView, before: String, target: () -> String,
         cancelled: (() -> Boolean)?, gen: Int, onText: (CharSequence) -> Unit
     ): Long {
         val delays = charDelays(view, target())
         val dwell = 320L
         val total = (delays.maxOrNull() ?: 0L) + dwell
-        val old = before.toString()
+        val old = before
+        rainBefore[view] = old
         val rnd = java.util.Random()
         var snapped = false
         runTimed(0, total, { f ->
             if (snapped) return@runTimed
-            if (gen != transitionGen || cancelled?.invoke() == true) {
+            if (gen != transitionGen) {
                 snapped = true
+                return@runTimed
+            }
+            if (cancelled?.invoke() == true) {
+                snapped = true
+                rainBefore.remove(view)
                 onText(target())
                 return@runTimed
             }
@@ -410,7 +418,10 @@ class MainActivity : Activity() {
             }
             onText(span)
         }, {
-            if (!snapped && gen == transitionGen) onText(target())
+            if (!snapped && gen == transitionGen) {
+                rainBefore.remove(view)
+                onText(target())
+            }
         })
         return total
     }
@@ -450,6 +461,8 @@ class MainActivity : Activity() {
         val gen = ++transitionGen
         switching = true
         statusAnimating = false
+        val carried = HashMap<TextView, String>(rainBefore)
+        rainBefore.clear()
         rain.play(1900L)
         val length = 520L
         var finish = 0L
@@ -462,7 +475,7 @@ class MainActivity : Activity() {
             scramble(delay, length, target, tile, onText, null, cancelled) { gen != transitionGen }
         }
         fun addText(view: TextView, target: () -> String, cancelled: (() -> Boolean)? = null, onText: (CharSequence) -> Unit) {
-            finish = maxOf(finish, rainText(view, view.text, target, cancelled, gen, onText))
+            finish = maxOf(finish, rainText(view, carried[view] ?: view.text.toString(), target, cancelled, gen, onText))
         }
         if (!statusLive) addText(statusLabel, { chipMessage() }, { statusLive }) { statusLabel.text = it }
         addText(cardTitle, { getString(R.string.card_title) }) { cardTitle.text = it }
@@ -476,6 +489,9 @@ class MainActivity : Activity() {
         addText(hintText, { getString(R.string.hint_case) }) { hintText.text = it }
         addText(developerText, { developerMessage() }) { developerText.text = if (it is SpannableString) it else styleDeveloper(it.toString()) }
         addText(disclaimerText, { disclaimerMessage() }) { disclaimerText.text = it }
+        if (statusLive) statusLabel.text = chipMessage()
+        if (updatedText.visibility != View.VISIBLE) updatedText.text = updatedMessage()
+        if (headsetPct == null) headsetText.text = ""
         add(leftRow, { getString(R.string.charging) }) { leftRow.chargingText = it }
         add(rightRow, { getString(R.string.charging) }) { rightRow.chargingText = it }
         add(caseRow, { getString(R.string.charging) }) { caseRow.chargingText = it }
@@ -981,7 +997,7 @@ class MainActivity : Activity() {
         var widest = 0f
         for (t in texts) widest = maxOf(widest, view.paint.measureText(t))
         view.minWidth = widest.toInt() + extra + 1
-        view.gravity = Gravity.CENTER
+        view.gravity = Gravity.START or Gravity.CENTER_VERTICAL
     }
 
     private fun darkLine() = View(this).apply { setBackgroundColor(Palette.LINE_DARK) }
