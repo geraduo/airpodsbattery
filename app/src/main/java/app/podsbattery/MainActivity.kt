@@ -68,7 +68,8 @@ class MainActivity : Activity() {
     private lateinit var caseRow: BatteryRow
     private lateinit var cardTitle: TextView
     private lateinit var hintText: TextView
-    private lateinit var disclaimerText: TextView
+    private lateinit var disclaimerLineA: TextView
+    private lateinit var disclaimerLineB: TextView
     private lateinit var developerText: TextView
     private lateinit var updatedText: TextView
     private lateinit var statusPill: LinearLayout
@@ -358,7 +359,7 @@ class MainActivity : Activity() {
 
     private fun rainText(
         view: TextView, before: String, target: () -> String,
-        cancelled: (() -> Boolean)?, gen: Int, decorate: ((SpannableString, String) -> Unit)?,
+        cancelled: (() -> Boolean)?, gen: Int, emphasis: String?,
         onText: (CharSequence) -> Unit
     ): Long {
         val delays = charDelays(view, target())
@@ -385,6 +386,7 @@ class MainActivity : Activity() {
             val length = maxOf(old.length, text.length)
             val out = StringBuilder(length)
             val orange = BooleanArray(length)
+            val shownOld = BooleanArray(length)
             for (i in 0 until length) {
                 val d = if (delays.isEmpty()) 0L else delays[minOf(i, delays.size - 1)]
                 val dt = elapsed - d
@@ -401,13 +403,34 @@ class MainActivity : Activity() {
                         }
                     } else {
                         out.append(if (i < old.length) old[i] else ' ')
+                        shownOld[i] = true
                     }
                 } else if (dt < 0) {
                     out.append(old[i])
+                    shownOld[i] = true
                 }
             }
             val span = SpannableString(out)
-            decorate?.invoke(span, text)
+            if (emphasis != null) {
+                val oldFrom = old.indexOf(emphasis)
+                val newFrom = text.indexOf(emphasis)
+                var k = 0
+                while (k < out.length) {
+                    val from = if (shownOld[k]) oldFrom else newFrom
+                    if (from >= 0 && k >= from && k < from + emphasis.length) {
+                        var m = k
+                        while (m < out.length) {
+                            val mf = if (shownOld[m]) oldFrom else newFrom
+                            if (mf >= 0 && m >= mf && m < mf + emphasis.length) m++ else break
+                        }
+                        span.setSpan(ForegroundColorSpan(Palette.TEXT), k, m, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        span.setSpan(StyleSpan(Typeface.BOLD), k, m, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        k = m
+                    } else {
+                        k++
+                    }
+                }
+            }
             var i = 0
             while (i < out.length) {
                 if (orange[i]) {
@@ -479,11 +502,11 @@ class MainActivity : Activity() {
         }
         fun addText(
             view: TextView, target: () -> String, cancelled: (() -> Boolean)? = null,
-            decorate: ((SpannableString, String) -> Unit)? = null, onText: (CharSequence) -> Unit
+            emphasis: String? = null, onText: (CharSequence) -> Unit
         ) {
             finish = maxOf(
                 finish,
-                rainText(view, carried[view] ?: view.text.toString(), target, cancelled, gen, decorate, onText)
+                rainText(view, carried[view] ?: view.text.toString(), target, cancelled, gen, emphasis, onText)
             )
         }
         if (!statusLive) addText(statusLabel, { chipMessage() }, { statusLive }) { statusLabel.text = it }
@@ -496,10 +519,11 @@ class MainActivity : Activity() {
         add(caseRow, { getString(R.string.row_case) }) { caseRow.title = it }
         if (headsetPct != null) addText(headsetText, { headsetMessage() }) { headsetText.text = it }
         addText(hintText, { getString(R.string.hint_case) }) { hintText.text = it }
-        addText(developerText, { developerMessage() }, null, { span, text -> decorateDeveloper(span, text) }) {
+        addText(developerText, { developerMessage() }, null, DEVELOPER) {
             developerText.text = if (it is SpannableString) it else styleDeveloper(it.toString())
         }
-        addText(disclaimerText, { disclaimerMessage() }) { disclaimerText.text = it }
+        addText(disclaimerLineA, { getString(R.string.disclaimer_a) }) { disclaimerLineA.text = it }
+        addText(disclaimerLineB, { disclaimerLineBMessage() }) { disclaimerLineB.text = it }
         if (statusLive) statusLabel.text = chipMessage()
         if (updatedText.visibility != View.VISIBLE) updatedText.text = updatedMessage()
         if (headsetPct == null) headsetText.text = ""
@@ -883,15 +907,6 @@ class MainActivity : Activity() {
 
     private fun developerMessage() = getString(R.string.developed_by) + " " + DEVELOPER
 
-    private fun decorateDeveloper(span: SpannableString, text: String) {
-        val from = text.indexOf(DEVELOPER)
-        if (from < 0) return
-        val to = minOf(from + DEVELOPER.length, span.length)
-        if (from >= to) return
-        span.setSpan(ForegroundColorSpan(Palette.TEXT), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        span.setSpan(StyleSpan(Typeface.BOLD), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-    }
-
     private fun styleDeveloper(text: String): CharSequence {
         val out = SpannableString(text)
         val from = text.indexOf(DEVELOPER)
@@ -909,9 +924,9 @@ class MainActivity : Activity() {
         } catch (_: Exception) {}
     }
 
-    private fun disclaimerMessage(): String {
+    private fun disclaimerLineBMessage(): String {
         val version = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { null }
-        return getString(R.string.disclaimer) + if (version != null) "  ·  v$version" else ""
+        return getString(R.string.disclaimer_b) + if (version != null) "  ·  v$version" else ""
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -1183,9 +1198,18 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
         })
 
-        disclaimerText = mono(disclaimerMessage(), 9f)
-        col.addView(disclaimerText,
+        disclaimerLineA = mono(getString(R.string.disclaimer_a), 9f).apply {
+            isSingleLine = true
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        disclaimerLineB = mono(disclaimerLineBMessage(), 9f).apply {
+            isSingleLine = true
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        col.addView(disclaimerLineA,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18); marginStart = dp(8); marginEnd = dp(8) })
+        col.addView(disclaimerLineB,
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4); marginStart = dp(8); marginEnd = dp(8) })
 
         scroll.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(scroll)

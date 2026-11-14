@@ -32,7 +32,8 @@
     <string name="headset_level">Overall battery via connection · %1$d%%</string>
 
     <string name="hint_case">Exact values arrive while the case lid is open.</string>
-    <string name="disclaimer">AirPods is a trademark of Apple Inc. This app is independent.</string>
+    <string name="disclaimer_a">AirPods is a trademark of Apple Inc.</string>
+    <string name="disclaimer_b">This app is independent.</string>
 
     <string name="developed_by">Developed by</string>
     <string name="updated_now">Updated just now</string>

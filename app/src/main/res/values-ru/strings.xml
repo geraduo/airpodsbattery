@@ -32,7 +32,8 @@
     <string name="headset_level">Общий заряд по подключению · %1$d%%</string>
 
     <string name="hint_case">Точные данные приходят при открытой крышке кейса.</string>
-    <string name="disclaimer">AirPods — товарный знак Apple Inc. Приложение независимое.</string>
+    <string name="disclaimer_a">AirPods — товарный знак Apple Inc.</string>
+    <string name="disclaimer_b">Приложение независимое.</string>
 
     <string name="developed_by">Разработано</string>
     <string name="updated_now">Обновлено только что</string>
