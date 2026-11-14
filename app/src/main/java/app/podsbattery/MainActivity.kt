@@ -22,6 +22,7 @@ import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Shader
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
@@ -357,7 +358,8 @@ class MainActivity : Activity() {
 
     private fun rainText(
         view: TextView, before: String, target: () -> String,
-        cancelled: (() -> Boolean)?, gen: Int, onText: (CharSequence) -> Unit
+        cancelled: (() -> Boolean)?, gen: Int, decorate: ((SpannableString, String) -> Unit)?,
+        onText: (CharSequence) -> Unit
     ): Long {
         val delays = charDelays(view, target())
         val dwell = 320L
@@ -405,6 +407,7 @@ class MainActivity : Activity() {
                 }
             }
             val span = SpannableString(out)
+            decorate?.invoke(span, text)
             var i = 0
             while (i < out.length) {
                 if (orange[i]) {
@@ -474,8 +477,14 @@ class MainActivity : Activity() {
             finish = maxOf(finish, delay + length)
             scramble(delay, length, target, tile, onText, null, cancelled) { gen != transitionGen }
         }
-        fun addText(view: TextView, target: () -> String, cancelled: (() -> Boolean)? = null, onText: (CharSequence) -> Unit) {
-            finish = maxOf(finish, rainText(view, carried[view] ?: view.text.toString(), target, cancelled, gen, onText))
+        fun addText(
+            view: TextView, target: () -> String, cancelled: (() -> Boolean)? = null,
+            decorate: ((SpannableString, String) -> Unit)? = null, onText: (CharSequence) -> Unit
+        ) {
+            finish = maxOf(
+                finish,
+                rainText(view, carried[view] ?: view.text.toString(), target, cancelled, gen, decorate, onText)
+            )
         }
         if (!statusLive) addText(statusLabel, { chipMessage() }, { statusLive }) { statusLabel.text = it }
         addText(cardTitle, { getString(R.string.card_title) }) { cardTitle.text = it }
@@ -487,7 +496,9 @@ class MainActivity : Activity() {
         add(caseRow, { getString(R.string.row_case) }) { caseRow.title = it }
         if (headsetPct != null) addText(headsetText, { headsetMessage() }) { headsetText.text = it }
         addText(hintText, { getString(R.string.hint_case) }) { hintText.text = it }
-        addText(developerText, { developerMessage() }) { developerText.text = if (it is SpannableString) it else styleDeveloper(it.toString()) }
+        addText(developerText, { developerMessage() }, null, { span, text -> decorateDeveloper(span, text) }) {
+            developerText.text = if (it is SpannableString) it else styleDeveloper(it.toString())
+        }
         addText(disclaimerText, { disclaimerMessage() }) { disclaimerText.text = it }
         if (statusLive) statusLabel.text = chipMessage()
         if (updatedText.visibility != View.VISIBLE) updatedText.text = updatedMessage()
@@ -577,7 +588,9 @@ class MainActivity : Activity() {
 
     private fun rebuildUi() {
         val gen = ++themeGen
+        val previousRain = if (::rain.isInitialized) rain else null
         val fresh = buildUi()
+        previousRain?.let { rain.adopt(it) }
         restoreUi()
         fresh.alpha = 0f
         host.addView(fresh)
@@ -870,6 +883,15 @@ class MainActivity : Activity() {
 
     private fun developerMessage() = getString(R.string.developed_by) + " " + DEVELOPER
 
+    private fun decorateDeveloper(span: SpannableString, text: String) {
+        val from = text.indexOf(DEVELOPER)
+        if (from < 0) return
+        val to = minOf(from + DEVELOPER.length, span.length)
+        if (from >= to) return
+        span.setSpan(ForegroundColorSpan(Palette.TEXT), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        span.setSpan(StyleSpan(Typeface.BOLD), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+
     private fun styleDeveloper(text: String): CharSequence {
         val out = SpannableString(text)
         val from = text.indexOf(DEVELOPER)
@@ -993,9 +1015,17 @@ class MainActivity : Activity() {
         return createConfigurationContext(config).getString(id)
     }
 
-    private fun lockWidth(view: TextView, texts: List<String>, extra: Int) {
+    private fun lockWidth(view: TextView, texts: List<String>, extra: Int, boldPart: String? = null) {
+        val boldPaint = Paint(view.paint).apply { typeface = Typeface.create(view.typeface, Typeface.BOLD) }
         var widest = 0f
-        for (t in texts) widest = maxOf(widest, view.paint.measureText(t))
+        for (t in texts) {
+            val w = if (boldPart != null && t.endsWith(boldPart)) {
+                view.paint.measureText(t.substring(0, t.length - boldPart.length)) + boldPaint.measureText(boldPart)
+            } else {
+                view.paint.measureText(t)
+            }
+            widest = maxOf(widest, w)
+        }
         view.minWidth = widest.toInt() + extra + 1
         view.gravity = Gravity.START or Gravity.CENTER_VERTICAL
     }
@@ -1132,7 +1162,7 @@ class MainActivity : Activity() {
         col.addView(card, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
 
         developerText = tv(styleDeveloper(developerMessage()), 12f, Palette.MUTED).apply { isSingleLine = true }
-        lockWidth(developerText, listOf("en", "ru").map { stringIn(it, R.string.developed_by) + " " + DEVELOPER }, 0)
+        lockWidth(developerText, listOf("en", "ru").map { stringIn(it, R.string.developed_by) + " " + DEVELOPER }, 0, DEVELOPER)
         developerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1153,7 +1183,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
         })
 
-        disclaimerText = mono(disclaimerMessage(), 9f).apply { gravity = Gravity.CENTER }
+        disclaimerText = mono(disclaimerMessage(), 9f)
         col.addView(disclaimerText,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18); marginStart = dp(8); marginEnd = dp(8) })
 

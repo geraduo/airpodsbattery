@@ -275,6 +275,18 @@ class MatrixRainView(context: Context) : View(context) {
         return (p * length).toLong()
     }
 
+    fun adopt(other: MatrixRainView) {
+        if (!other.playing) return
+        playing = true
+        direction = other.direction
+        startPos = other.startPos
+        startedAt = other.startedAt
+        length = other.length
+        frame = other.frame
+        removeCallbacks(ticker)
+        post(ticker)
+    }
+
     fun play(duration: Long) {
         direction = if (playing) -direction else 1
         startPos = if (direction > 0) 0f else height + 14 * 15 * d
